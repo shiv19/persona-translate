@@ -1,6 +1,28 @@
 import { useState, useEffect } from "react"
-import type { Persona } from "../types"
-import { ArrowLeft } from "lucide-react"
+import type { Persona, PersonaPerson } from "../types"
+import { ArrowLeft, Plus, X } from "lucide-react"
+
+const COMMON_RELATIONS = [
+  "son",
+  "daughter",
+  "grandson",
+  "granddaughter",
+  "grandchild",
+  "husband",
+  "wife",
+  "older brother",
+  "younger brother",
+  "older sister",
+  "younger sister",
+  "mother",
+  "father",
+  "son-in-law",
+  "daughter-in-law",
+  "niece",
+  "nephew",
+  "friend",
+  "neighbor",
+]
 
 interface Props {
   persona?: Persona
@@ -14,6 +36,7 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
   const [sourceLanguage, setSourceLanguage] = useState(persona?.sourceLanguage ?? "English")
   const [relationship, setRelationship] = useState(persona?.relationship ?? "")
   const [context, setContext] = useState(persona?.context ?? "")
+  const [people, setPeople] = useState<PersonaPerson[]>(persona?.people ?? [])
 
   useEffect(() => {
     if (persona) {
@@ -22,12 +45,26 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
       setSourceLanguage(persona.sourceLanguage)
       setRelationship(persona.relationship)
       setContext(persona.context)
+      setPeople(persona.people ?? [])
     }
   }, [persona])
 
+  function updatePerson(index: number, patch: Partial<PersonaPerson>) {
+    setPeople((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)))
+  }
+
+  function addPerson() {
+    setPeople((prev) => [...prev, { name: "", relationToListener: "", notes: "" }])
+  }
+
+  function removePerson(index: number) {
+    setPeople((prev) => prev.filter((_, i) => i !== index))
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    onSave({ name, targetLanguage, sourceLanguage, relationship, context })
+    const cleanedPeople = people.filter((p) => p.name.trim() && p.relationToListener.trim())
+    onSave({ name, targetLanguage, sourceLanguage, relationship, context, people: cleanedPeople })
   }
 
   return (
@@ -90,6 +127,55 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
           />
           <span className="form-hint">
             This determines which pronouns and honorifics to use
+          </span>
+        </div>
+
+        <div className="form-group">
+          <label>People they know</label>
+          {people.map((person, i) => (
+            <div key={i} className="person-row">
+              <div className="person-row-fields">
+                <input
+                  type="text"
+                  placeholder="Name, e.g., Senku"
+                  value={person.name}
+                  onChange={(e) => updatePerson(i, { name: e.target.value })}
+                />
+                <input
+                  type="text"
+                  list="relation-options"
+                  placeholder={`Their relationship to ${name || "this person"}, e.g., grandson`}
+                  value={person.relationToListener}
+                  onChange={(e) => updatePerson(i, { relationToListener: e.target.value })}
+                />
+                <input
+                  type="text"
+                  placeholder="Notes (optional), e.g., 17 months old"
+                  value={person.notes ?? ""}
+                  onChange={(e) => updatePerson(i, { notes: e.target.value })}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm btn-danger"
+                onClick={() => removePerson(i)}
+                title="Remove person"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ))}
+          <datalist id="relation-options">
+            {COMMON_RELATIONS.map((r) => (
+              <option key={r} value={r} />
+            ))}
+          </datalist>
+          <button type="button" className="btn btn-ghost btn-sm person-add-btn" onClick={addPerson}>
+            <Plus size={16} /> Add person
+          </button>
+          <span className="form-hint">
+            People often mentioned in conversation. Relationships are from{" "}
+            {name || "this person"}'s point of view — this ensures the right kinship terms are used.
           </span>
         </div>
 

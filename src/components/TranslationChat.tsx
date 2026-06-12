@@ -107,7 +107,7 @@ export function TranslationChat({ persona, onBack }: Props) {
     setLoading(true)
 
     try {
-      const translation = await translate(persona, text, messages, direction)
+      const { translation, debug } = await translate(persona, text, messages, direction)
 
       const msg: Message = {
         id: uid(),
@@ -116,6 +116,7 @@ export function TranslationChat({ persona, onBack }: Props) {
         translation,
         direction,
         createdAt: Date.now(),
+        debug,
       }
 
       saveMessage(msg)
@@ -139,7 +140,7 @@ export function TranslationChat({ persona, onBack }: Props) {
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       handleSend()
     }
@@ -247,6 +248,21 @@ export function TranslationChat({ persona, onBack }: Props) {
                 </span>
               </div>
               <div className="chat-bubble-text">{msg.translation}</div>
+              {msg.debug && (
+                <details className="debug-details">
+                  <summary>Debug</summary>
+                  <dl className="debug-grid">
+                    <dt>Speaker</dt>
+                    <dd>{msg.debug.speaker}</dd>
+                    <dt>Register</dt>
+                    <dd>{msg.debug.register}</dd>
+                    <dt>Honorifics</dt>
+                    <dd>{msg.debug.honorificsUsed}</dd>
+                    <dt>Referents</dt>
+                    <dd>{msg.debug.referents}</dd>
+                  </dl>
+                </details>
+              )}
             </div>
           </div>
         ))}

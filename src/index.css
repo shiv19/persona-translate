@@ -27,6 +27,7 @@
 
 html, body, #root {
   height: 100dvh;
+  height: var(--app-height, 100dvh);
   width: 100%;
   overflow: hidden;
 }
@@ -554,9 +555,57 @@ body {
 }
 
 .chat-input-row {
+  position: relative;
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
+  flex-direction: column;
+}
+
+.chat-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 48px 12px 14px;
+  font-family: var(--font);
+  font-size: 15px;
+  color: var(--text);
+  outline: none;
+  resize: none;
+  min-height: 60px;
+  max-height: 160px;
+  line-height: 1.4;
+  transition: border-color 0.15s ease;
+}
+
+.chat-send-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50% !important;
+  padding: 0 !important;
+  font-size: 16px;
+  flex-shrink: 0;
+  background: var(--accent);
+  color: #fff;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  opacity: 1;
+  transform: scale(1.05);
+}
+
+.chat-send-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.chat-send-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .chat-input {
@@ -594,17 +643,17 @@ body {
 }
 
 .chat-speaker-toggle {
-  display: inline-flex;
+  display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 5px 10px !important;
-  border-radius: 20px !important;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  align-self: flex-start;
+  width: 100%;
   transition: all 0.15s ease;
 }
 
@@ -620,6 +669,12 @@ body {
   border-color: var(--accent);
 }
 
+.chat-speaker-toggle .speaker-label {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 /* ── Scrollbar ── */
 
 ::-webkit-scrollbar {
@@ -633,6 +688,68 @@ body {
 ::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 2px;
+}
+
+/* ── People rows (persona form) ── */
+
+.person-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.person-row-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.person-add-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Debug details ── */
+
+.debug-details {
+  margin-top: 8px;
+  font-size: 0.75rem;
+}
+
+.debug-details summary {
+  cursor: pointer;
+  color: var(--text-muted, #888);
+  user-select: none;
+}
+
+.debug-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 8px 0 0;
+  padding: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.debug-grid dt {
+  color: var(--text-muted, #888);
+  white-space: nowrap;
+}
+
+.debug-grid dd {
+  margin: 0;
+  word-break: break-word;
 }
 
 /* ── Desktop ── */

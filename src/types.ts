@@ -5,7 +5,14 @@ export interface Persona {
   sourceLanguage: string
   relationship: string
   context: string
+  people?: PersonaPerson[]
   createdAt: number
+}
+
+export interface PersonaPerson {
+  name: string
+  relationToListener: string
+  notes?: string
 }
 
 export interface Message {
@@ -15,6 +22,14 @@ export interface Message {
   translation: string
   direction: "to-target" | "from-target"
   createdAt: number
+  debug?: TranslationDebug | null
+}
+
+export interface TranslationDebug {
+  speaker: string
+  register: string
+  honorificsUsed: string
+  referents: string
 }
 
 export function uid(): string {
