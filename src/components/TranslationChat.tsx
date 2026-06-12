@@ -1,7 +1,42 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import type { Persona, Message } from "../types"
+import { uid } from "../types"
 import { translate } from "../ai"
 import { loadMessages, saveMessage, clearMessages } from "../storage"
+import { ArrowLeft, Trash2, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft } from "lucide-react"
+
+const LANG_MAP: Record<string, string> = {
+  vietnamese: "vi-VN",
+  viet: "vi-VN",
+  korean: "ko-KR",
+  japanese: "ja-JP",
+  chinese: "zh-CN",
+  mandarin: "zh-CN",
+  cantonese: "zh-HK",
+  spanish: "es-ES",
+  french: "fr-FR",
+  german: "de-DE",
+  portuguese: "pt-BR",
+  italian: "it-IT",
+  thai: "th-TH",
+  tagalog: "fil-PH",
+  filipino: "fil-PH",
+  hindi: "hi-IN",
+  tamil: "ta-IN",
+  arabic: "ar-SA",
+  russian: "ru-RU",
+  indonesian: "id-ID",
+  malay: "ms-MY",
+  english: "en-US",
+}
+
+function resolveLangCode(language: string): string {
+  const lower = language.toLowerCase().trim()
+  for (const [key, code] of Object.entries(LANG_MAP)) {
+    if (lower.includes(key)) return code
+  }
+  return lower
+}
 
 interface Props {
   persona: Persona
@@ -14,8 +49,44 @@ export function TranslationChat({ persona, onBack }: Props) {
   const [loading, setLoading] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [showConfirmClear, setShowConfirmClear] = useState(false)
+  const [playingId, setPlayingId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  const stopSpeech = useCallback(() => {
+    window.speechSynthesis.cancel()
+    setPlayingId(null)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      window.speechSynthesis.cancel()
+    }
+  }, [])
+
+  function handleSpeak(text: string, messageId: string) {
+    if (playingId === messageId) {
+      stopSpeech()
+      return
+    }
+
+    stopSpeech()
+
+    const utterance = new SpeechSynthesisUtterance(text)
+    const langCode = resolveLangCode(persona.targetLanguage)
+    utterance.lang = langCode
+    utterance.rate = 0.9
+
+    const voices = window.speechSynthesis.getVoices()
+    const match = voices.find((v) => v.lang.startsWith(langCode.split("-")[0]))
+    if (match) utterance.voice = match
+
+    utterance.onend = () => setPlayingId(null)
+    utterance.onerror = () => setPlayingId(null)
+
+    setPlayingId(messageId)
+    window.speechSynthesis.speak(utterance)
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -36,7 +107,7 @@ export function TranslationChat({ persona, onBack }: Props) {
       const translation = await translate(persona, text, messages)
 
       const msg: Message = {
-        id: crypto.randomUUID(),
+        id: uid(),
         personaId: persona.id,
         original: text,
         translation,
@@ -48,7 +119,7 @@ export function TranslationChat({ persona, onBack }: Props) {
       setMessages((prev) => [...prev, msg])
     } catch (err) {
       const errorMsg: Message = {
-        id: crypto.randomUUID(),
+        id: uid(),
         personaId: persona.id,
         original: text,
         translation: `Error: ${err instanceof Error ? err.message : "Translation failed"}`,
@@ -86,12 +157,12 @@ export function TranslationChat({ persona, onBack }: Props) {
     <div className="screen chat-screen">
       <header className="chat-header">
         <button className="btn btn-ghost" onClick={onBack}>
-          ←
+          <ArrowLeft size={20} />
         </button>
         <div className="chat-header-info">
           <h3>{persona.name}</h3>
           <span className="chat-header-meta">
-            {persona.sourceLanguage} ↔ {persona.targetLanguage}
+            {persona.sourceLanguage} <ArrowRightLeft size={12} /> {persona.targetLanguage}
           </span>
         </div>
         <div className="chat-header-actions">
@@ -100,7 +171,7 @@ export function TranslationChat({ persona, onBack }: Props) {
               className="btn btn-ghost btn-sm"
               onClick={() => setShowConfirmClear(!showConfirmClear)}
             >
-              🗑️
+              <Trash2 size={16} />
             </button>
           )}
         </div>
@@ -137,14 +208,24 @@ export function TranslationChat({ persona, onBack }: Props) {
               <div className="chat-bubble-label">You said</div>
               <div className="chat-bubble-text">{msg.original}</div>
             </div>
-            <div
-              className="chat-bubble chat-bubble-translation"
-              onClick={() => handleCopy(msg.translation, msg.id)}
-            >
+            <div className="chat-bubble chat-bubble-translation">
               <div className="chat-bubble-label">
                 Translation
-                <span className="copy-hint">
-                  {copiedId === msg.id ? " ✓ Copied" : " tap to copy"}
+                <span className="bubble-actions">
+                  <button
+                    className={`btn btn-ghost btn-sm btn-speak ${playingId === msg.id ? "speaking" : ""}`}
+                    onClick={() => handleSpeak(msg.translation, msg.id)}
+                    title={playingId === msg.id ? "Stop" : "Play aloud"}
+                  >
+                    {playingId === msg.id ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleCopy(msg.translation, msg.id)}
+                    title="Copy"
+                  >
+                    {copiedId === msg.id ? <Check size={16} /> : <Copy size={16} />}
+                  </button>
                 </span>
               </div>
               <div className="chat-bubble-text">{msg.translation}</div>
@@ -190,7 +271,7 @@ export function TranslationChat({ persona, onBack }: Props) {
           onClick={handleSend}
           disabled={loading || !input.trim()}
         >
-          {loading ? "..." : "→"}
+          {loading ? "..." : <SendHorizontal size={20} />}
         </button>
       </div>
     </div>

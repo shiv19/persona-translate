@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import type { Persona } from "../types"
+import { ArrowLeft } from "lucide-react"
 
 interface Props {
   persona?: Persona
@@ -33,7 +34,7 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
     <div className="screen">
       <header className="screen-header">
         <button className="btn btn-ghost" onClick={onCancel}>
-          ← Back
+          <ArrowLeft size={20} /> Back
         </button>
         <h2>{persona ? "Edit Persona" : "New Persona"}</h2>
       </header>

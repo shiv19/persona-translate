@@ -451,12 +451,7 @@ body {
 .chat-bubble-translation {
   background: var(--bg-card);
   border: 1px solid var(--accent-glow);
-  cursor: pointer;
   transition: background 0.15s ease;
-}
-
-.chat-bubble-translation:active {
-  background: var(--bg-input);
 }
 
 .chat-bubble-label {
@@ -475,6 +470,34 @@ body {
   font-weight: 400;
   font-size: 10px;
   color: var(--accent);
+}
+
+.bubble-actions {
+  display: flex;
+  gap: 0;
+  align-items: center;
+}
+
+.bubble-actions .btn {
+  padding: 4px 6px;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.bubble-actions .btn:hover {
+  opacity: 1;
+}
+
+.bubble-actions .btn-speak.speaking {
+  opacity: 1;
+  animation: pulse-glow 1s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .chat-bubble-text {
