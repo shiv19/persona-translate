@@ -66,7 +66,7 @@ export function TranslationChat({ persona, onBack }: Props) {
     }
   }, [])
 
-  function handleSpeak(text: string, messageId: string) {
+  function handleSpeak(text: string, messageId: string, msgDirection: "to-target" | "from-target") {
     if (playingId === messageId) {
       stopSpeech()
       return
@@ -75,7 +75,8 @@ export function TranslationChat({ persona, onBack }: Props) {
     stopSpeech()
 
     const utterance = new SpeechSynthesisUtterance(text)
-    const langCode = resolveLangCode(persona.targetLanguage)
+    const ttsLang = msgDirection === "to-target" ? persona.targetLanguage : persona.sourceLanguage
+    const langCode = resolveLangCode(ttsLang)
     utterance.lang = langCode
     utterance.rate = 0.9
 
@@ -217,6 +218,22 @@ export function TranslationChat({ persona, onBack }: Props) {
             <div className="chat-bubble chat-bubble-original">
               <div className="chat-bubble-label">
                 {msg.direction === "to-target" ? "You said" : `${persona.name} said`}
+                <span className="bubble-actions">
+                  <button
+                    className={`btn btn-ghost btn-sm btn-speak ${playingId === `orig-${msg.id}` ? "speaking" : ""}`}
+                    onClick={() => handleSpeak(msg.original, `orig-${msg.id}`, msg.direction === "to-target" ? "from-target" : "to-target")}
+                    title={playingId === `orig-${msg.id}` ? "Stop" : "Play aloud"}
+                  >
+                    {playingId === `orig-${msg.id}` ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleCopy(msg.original, `orig-${msg.id}`)}
+                    title="Copy"
+                  >
+                    {copiedId === `orig-${msg.id}` ? <Check size={16} /> : <Copy size={16} />}
+                  </button>
+                </span>
               </div>
               <div className="chat-bubble-text">{msg.original}</div>
             </div>
@@ -226,7 +243,7 @@ export function TranslationChat({ persona, onBack }: Props) {
                 <span className="bubble-actions">
                   <button
                     className={`btn btn-ghost btn-sm btn-speak ${playingId === msg.id ? "speaking" : ""}`}
-                    onClick={() => handleSpeak(msg.translation, msg.id)}
+                    onClick={() => handleSpeak(msg.translation, msg.id, msg.direction)}
                     title={playingId === msg.id ? "Stop" : "Play aloud"}
                   >
                     {playingId === msg.id ? <VolumeX size={16} /> : <Volume2 size={16} />}
