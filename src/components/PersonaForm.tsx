@@ -35,6 +35,7 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
   const [targetLanguage, setTargetLanguage] = useState(persona?.targetLanguage ?? "")
   const [sourceLanguage, setSourceLanguage] = useState(persona?.sourceLanguage ?? "English")
   const [relationship, setRelationship] = useState(persona?.relationship ?? "")
+  const [reverseRelationship, setReverseRelationship] = useState(persona?.reverseRelationship ?? "")
   const [context, setContext] = useState(persona?.context ?? "")
   const [people, setPeople] = useState<PersonaPerson[]>(persona?.people ?? [])
 
@@ -44,6 +45,7 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
       setTargetLanguage(persona.targetLanguage)
       setSourceLanguage(persona.sourceLanguage)
       setRelationship(persona.relationship)
+      setReverseRelationship(persona.reverseRelationship ?? "")
       setContext(persona.context)
       setPeople(persona.people ?? [])
     }
@@ -64,7 +66,7 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const cleanedPeople = people.filter((p) => p.name.trim() && p.relationToListener.trim())
-    onSave({ name, targetLanguage, sourceLanguage, relationship, context, people: cleanedPeople })
+    onSave({ name, targetLanguage, sourceLanguage, relationship, reverseRelationship, context, people: cleanedPeople })
   }
 
   return (
@@ -126,7 +128,21 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
             required
           />
           <span className="form-hint">
-            This determines which pronouns and honorifics to use
+            This determines which pronouns and honorifics to use when YOU are speaking
+          </span>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="reverseRelationship">Your relationship to them</label>
+          <input
+            id="reverseRelationship"
+            type="text"
+            placeholder="e.g., her husband, their son-in-law"
+            value={reverseRelationship}
+            onChange={(e) => setReverseRelationship(e.target.value)}
+          />
+          <span className="form-hint">
+            How {name || "this person"} sees you — used when they are speaking so pronouns/honorifics are correct from their side
           </span>
         </div>
 
@@ -135,25 +151,44 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
           {people.map((person, i) => (
             <div key={i} className="person-row">
               <div className="person-row-fields">
-                <input
-                  type="text"
-                  placeholder="Name, e.g., Senku"
-                  value={person.name}
-                  onChange={(e) => updatePerson(i, { name: e.target.value })}
-                />
-                <input
-                  type="text"
-                  list="relation-options"
-                  placeholder={`Their relationship to ${name || "this person"}, e.g., grandson`}
-                  value={person.relationToListener}
-                  onChange={(e) => updatePerson(i, { relationToListener: e.target.value })}
-                />
-                <input
-                  type="text"
-                  placeholder="Notes (optional), e.g., 17 months old"
-                  value={person.notes ?? ""}
-                  onChange={(e) => updatePerson(i, { notes: e.target.value })}
-                />
+                <div className="form-group">
+                  <label>Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Senku"
+                    value={person.name}
+                    onChange={(e) => updatePerson(i, { name: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Relation to {name || "them"}</label>
+                  <input
+                    type="text"
+                    list="relation-options"
+                    placeholder="e.g., grandson"
+                    value={person.relationToListener}
+                    onChange={(e) => updatePerson(i, { relationToListener: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Relation to you</label>
+                  <input
+                    type="text"
+                    list="relation-options"
+                    placeholder="e.g., son"
+                    value={person.relationToSpeaker ?? ""}
+                    onChange={(e) => updatePerson(i, { relationToSpeaker: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Notes</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., 17 months old"
+                    value={person.notes ?? ""}
+                    onChange={(e) => updatePerson(i, { notes: e.target.value })}
+                  />
+                </div>
               </div>
               <button
                 type="button"
@@ -174,8 +209,7 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
             <Plus size={16} /> Add person
           </button>
           <span className="form-hint">
-            People often mentioned in conversation. Relationships are from{" "}
-            {name || "this person"}'s point of view — this ensures the right kinship terms are used.
+            For each person: their relation to {name || "this person"} (used when you're speaking) and their relation to you (used when {name || "this person"} is speaking).
           </span>
         </div>
 

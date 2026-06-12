@@ -4,6 +4,7 @@ export interface Persona {
   targetLanguage: string
   sourceLanguage: string
   relationship: string
+  reverseRelationship: string
   context: string
   people?: PersonaPerson[]
   createdAt: number
@@ -12,6 +13,7 @@ export interface Persona {
 export interface PersonaPerson {
   name: string
   relationToListener: string
+  relationToSpeaker?: string
   notes?: string
 }
 

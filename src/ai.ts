@@ -39,35 +39,48 @@ export interface TranslateOutput {
   debug: TranslationDebug | null
 }
 
-function buildPeopleRoster(persona: Persona): string {
+function buildPeopleRoster(persona: Persona, direction: "to-target" | "from-target"): string {
   const people = persona.people?.filter((p) => p.name.trim() && p.relationToListener.trim()) ?? []
   if (people.length === 0) return ""
 
+  const speakerIsUser = direction === "to-target"
+  const listenerName = speakerIsUser ? persona.name : "the user"
+
   const lines = people.map((p) => {
     const note = p.notes?.trim() ? ` (${p.notes.trim()})` : ""
-    return `- ${p.name} — ${persona.name}'s ${p.relationToListener}${note} → when mentioned, use the kinship/address term for "${p.relationToListener}" from ${persona.name}'s perspective`
+    const relation = speakerIsUser
+      ? p.relationToListener
+      : (p.relationToSpeaker || p.relationToListener)
+    return `- ${p.name} — ${listenerName}'s ${relation}${note} → when mentioned, use the kinship/address term for "${relation}" from ${listenerName}'s perspective`
   })
 
   return `
 
-PEOPLE WHO MAY BE MENTIONED (this roster is AUTHORITATIVE — relationships are relative to ${persona.name}, the listener):
+PEOPLE WHO MAY BE MENTIONED (this roster is AUTHORITATIVE — relationships are relative to ${listenerName}, the listener):
 ${lines.join("\n")}`
 }
 
-function buildSystemPrompt(persona: Persona): string {
+function buildSystemPrompt(persona: Persona, direction: "to-target" | "from-target"): string {
+  const speakerIsUser = direction === "to-target"
+  const speakerName = speakerIsUser ? "the user" : persona.name
+  const listenerName = speakerIsUser ? persona.name : "the user"
+  const speakerRelationship = speakerIsUser
+    ? `${persona.name}'s relationship to the user: ${persona.relationship}`
+    : `The user's relationship to ${persona.name}: ${persona.reverseRelationship || persona.relationship}`
+
   return `You are a expert translator specializing in ${persona.targetLanguage}.
 
-The user is communicating with someone specific. Here is the context:
+The current message is spoken by ${speakerName} and addressed to ${listenerName}.
 
-- Person's name/role: ${persona.name}
-- Relationship to user: ${persona.relationship}
-- Additional context: ${persona.context}${buildPeopleRoster(persona)}
+Context:
+- ${speakerRelationship}
+- Additional context: ${persona.context}${buildPeopleRoster(persona, direction)}
 
 IMPORTANT RULES:
 1. Use the CORRECT honorifics, pronouns, and respect words for this specific relationship.
 2. In ${persona.targetLanguage}, the choice of pronouns and address terms depends heavily on the relationship between speakers. Always choose forms appropriate for "${persona.relationship}".
 3. Translate naturally — not word-by-word — as a native speaker would address this person.
-4. Pay close attention to WHO is speaking — the user or ${persona.name} — because this determines which direction to translate and which pronouns to use.
+4. TRANSLATION DIRECTION IS FIXED: [${persona.sourceLanguage} — You speaking] → output in ${persona.targetLanguage}. [${persona.targetLanguage} — ${persona.name} speaking] → output in ${persona.sourceLanguage}. Never output in the same language as the input.
 5. When the message mentions OTHER PEOPLE (not the speaker or listener), check the people roster first (it is authoritative), then the persona context. Refer to them using the KINSHIP TERM that matches their relationship to the LISTENER — e.g. if the listener's grandchild is mentioned, use the word for "grandchild" (+ name), with an affectionate register. NEVER use dismissive, distancing, or generic classifiers (in Vietnamese: never "thằng"/"con" for the listener's own family — use the kinship term like "cháu"/"bé" instead).
 6. Earlier messages in this conversation may contain translation mistakes. Do NOT copy pronoun or address-term choices from history — re-derive them from these rules every time.
 7. Respond with JSON. Decide speaker, register, and honorifics FIRST, then produce the translation consistent with those choices. The "translation" field must contain only the translated text.`
@@ -105,7 +118,7 @@ export async function translate(
     : `[${persona.targetLanguage} — ${persona.name} speaking]`
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(persona) },
+    { role: "system", content: buildSystemPrompt(persona, direction) },
     ...buildHistoryMessages(persona, recentHistory),
     { role: "user", content: `${speakerLabel} ${input}` },
   ]
