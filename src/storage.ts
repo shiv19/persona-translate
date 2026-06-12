@@ -40,6 +40,13 @@ export function clearMessages(personaId: string): void {
   localStorage.setItem(MESSAGES_KEY, JSON.stringify(filtered))
 }
 
+export function deleteMessage(messageId: string): void {
+  const raw = localStorage.getItem(MESSAGES_KEY)
+  const all: Message[] = raw ? JSON.parse(raw) : []
+  const filtered = all.filter((m) => m.id !== messageId)
+  localStorage.setItem(MESSAGES_KEY, JSON.stringify(filtered))
+}
+
 export function deletePersona(personaId: string): void {
   const personas = loadPersonas().filter((p) => p.id !== personaId)
   savePersonas(personas)

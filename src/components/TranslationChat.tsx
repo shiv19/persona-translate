@@ -2,8 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import type { Persona, Message } from "../types"
 import { uid } from "../types"
 import { translate } from "../ai"
-import { loadMessages, saveMessage, clearMessages } from "../storage"
-import { ArrowLeft, Trash2, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft } from "lucide-react"
+import { loadMessages, saveMessage, clearMessages, deleteMessage } from "../storage"
+import { ArrowLeft, Trash2, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft, X, Repeat } from "lucide-react"
 
 const LANG_MAP: Record<string, string> = {
   vietnamese: "vi-VN",
@@ -50,6 +50,8 @@ export function TranslationChat({ persona, onBack }: Props) {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [showConfirmClear, setShowConfirmClear] = useState(false)
   const [playingId, setPlayingId] = useState<string | null>(null)
+  const [pendingText, setPendingText] = useState<string | null>(null)
+  const [direction, setDirection] = useState<"to-target" | "from-target">("to-target")
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -101,17 +103,18 @@ export function TranslationChat({ persona, onBack }: Props) {
     if (!text || loading) return
 
     setInput("")
+    setPendingText(text)
     setLoading(true)
 
     try {
-      const translation = await translate(persona, text, messages)
+      const translation = await translate(persona, text, messages, direction)
 
       const msg: Message = {
         id: uid(),
         personaId: persona.id,
         original: text,
         translation,
-        direction: "to-target",
+        direction,
         createdAt: Date.now(),
       }
 
@@ -123,13 +126,14 @@ export function TranslationChat({ persona, onBack }: Props) {
         personaId: persona.id,
         original: text,
         translation: `Error: ${err instanceof Error ? err.message : "Translation failed"}`,
-        direction: "to-target",
+        direction,
         createdAt: Date.now(),
       }
       saveMessage(errorMsg)
       setMessages((prev) => [...prev, errorMsg])
     } finally {
       setLoading(false)
+      setPendingText(null)
       inputRef.current?.focus()
     }
   }
@@ -151,6 +155,11 @@ export function TranslationChat({ persona, onBack }: Props) {
     clearMessages(persona.id)
     setMessages([])
     setShowConfirmClear(false)
+  }
+
+  function handleDeleteTurn(messageId: string) {
+    deleteMessage(messageId)
+    setMessages((prev) => prev.filter((m) => m.id !== messageId))
   }
 
   return (
@@ -205,7 +214,9 @@ export function TranslationChat({ persona, onBack }: Props) {
         {messages.map((msg) => (
           <div key={msg.id} className="chat-bubble-wrapper">
             <div className="chat-bubble chat-bubble-original">
-              <div className="chat-bubble-label">You said</div>
+              <div className="chat-bubble-label">
+                {msg.direction === "to-target" ? "You said" : `${persona.name} said`}
+              </div>
               <div className="chat-bubble-text">{msg.original}</div>
             </div>
             <div className="chat-bubble chat-bubble-translation">
@@ -226,6 +237,13 @@ export function TranslationChat({ persona, onBack }: Props) {
                   >
                     {copiedId === msg.id ? <Check size={16} /> : <Copy size={16} />}
                   </button>
+                  <button
+                    className="btn btn-ghost btn-sm btn-danger"
+                    onClick={() => handleDeleteTurn(msg.id)}
+                    title="Delete this turn"
+                  >
+                    <X size={16} />
+                  </button>
                 </span>
               </div>
               <div className="chat-bubble-text">{msg.translation}</div>
@@ -236,8 +254,10 @@ export function TranslationChat({ persona, onBack }: Props) {
         {loading && (
           <div className="chat-bubble-wrapper">
             <div className="chat-bubble chat-bubble-original">
-              <div className="chat-bubble-label">You said</div>
-              <div className="chat-bubble-text">{input || "..."}</div>
+              <div className="chat-bubble-label">
+                {direction === "to-target" ? "You said" : `${persona.name} said`}
+              </div>
+              <div className="chat-bubble-text">{pendingText ?? "..."}</div>
             </div>
             <div className="chat-bubble chat-bubble-translation">
               <div className="chat-bubble-label">Translation</div>
@@ -256,22 +276,42 @@ export function TranslationChat({ persona, onBack }: Props) {
       </div>
 
       <div className="chat-input-area">
-        <textarea
-          ref={inputRef}
-          className="chat-input"
-          placeholder={`Type in ${persona.sourceLanguage} or ${persona.targetLanguage}...`}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          rows={1}
-          disabled={loading}
-        />
+        <div className="chat-input-row">
+          <textarea
+            ref={inputRef}
+            className="chat-input"
+            placeholder={
+              direction === "to-target"
+                ? `Type in ${persona.sourceLanguage}...`
+                : `Type in ${persona.targetLanguage}...`
+            }
+            value={input}
+            onChange={(e) => {
+              setInput(e.target.value)
+              e.target.style.height = "auto"
+              e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px"
+            }}
+            onKeyDown={handleKeyDown}
+            rows={2}
+            disabled={loading}
+          />
+          <button
+            className="btn btn-primary chat-send-btn"
+            onClick={handleSend}
+            disabled={loading || !input.trim()}
+          >
+            {loading ? "..." : <SendHorizontal size={20} />}
+          </button>
+        </div>
         <button
-          className="btn btn-primary chat-send-btn"
-          onClick={handleSend}
-          disabled={loading || !input.trim()}
+          className={`btn btn-ghost chat-speaker-toggle ${direction === "from-target" ? "toggled" : ""}`}
+          onClick={() => setDirection(direction === "to-target" ? "from-target" : "to-target")}
+          title={direction === "to-target" ? "Tap to switch to their voice" : "Tap to switch to your voice"}
         >
-          {loading ? "..." : <SendHorizontal size={20} />}
+          <Repeat size={14} />
+          <span className="speaker-label">
+            {direction === "to-target" ? `You → ${persona.targetLanguage}` : `${persona.name} → ${persona.sourceLanguage}`}
+          </span>
         </button>
       </div>
     </div>
