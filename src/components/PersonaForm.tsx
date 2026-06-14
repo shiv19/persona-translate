@@ -72,7 +72,7 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
   return (
     <div className="screen">
       <header className="screen-header">
-        <button className="btn btn-ghost" onClick={onCancel}>
+        <button className="btn btn-ghost back-mobile-only" onClick={onCancel}>
           <ArrowLeft size={20} /> Back
         </button>
         <h2>{persona ? "Edit Persona" : "New Persona"}</h2>

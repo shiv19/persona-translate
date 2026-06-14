@@ -167,7 +167,7 @@ export function TranslationChat({ persona, onBack }: Props) {
   return (
     <div className="screen chat-screen">
       <header className="chat-header">
-        <button className="btn btn-ghost" onClick={onBack}>
+        <button className="btn btn-ghost back-mobile-only" onClick={onBack}>
           <ArrowLeft size={20} />
         </button>
         <div className="chat-header-info">

@@ -1,35 +1,41 @@
 import OpenAI from "openai"
 import { z } from "zod"
-import { zodResponseFormat } from "openai/helpers/zod"
 import type { Persona, Message } from "./types"
+
+const BASE_URL = import.meta.env.VITE_ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4"
+const IS_ZAI = BASE_URL.includes("z.ai")
 
 const client = new OpenAI({
   apiKey: import.meta.env.VITE_ZAI_API_KEY,
-  // baseURL: "https://api.z.ai/api/coding/paas/v4",
-  baseURL: "https://openrouter.ai/api/v1",
+  baseURL: BASE_URL,
   dangerouslyAllowBrowser: true,
 })
 
-// const MODEL = "glm-5.1"
-const MODEL = "deepseek/deepseek-v4-pro"
+const MODEL = import.meta.env.VITE_ZAI_MODEL || "glm-5.2"
 const MAX_HISTORY = 5
 
 const TranslationResult = z.object({
-  speaker: z
-    .enum(["user", "other-person"])
-    .describe("Who is speaking this message — determines translation direction and pronoun/honorific choice"),
-  register: z
-    .string()
-    .describe("The level of formality/respect chosen for this relationship (e.g. formal, polite, casual, intimate) and why it fits"),
-  honorificsUsed: z
-    .string()
-    .describe("The specific honorifics, pronouns, and address terms used, appropriate for the relationship"),
-  referents: z
-    .string()
-    .describe("Third parties mentioned in the message (not the speaker or listener). For each: who they are according to the persona context, their relationship to the LISTENER, and the correct kinship/address term to refer to them from the listener's perspective. The translation MUST use exactly this term. 'none' if no third parties are mentioned"),
   translation: z
     .string()
     .describe("The final natural translation only — no notes, no romanization"),
+  // Debug/diagnostic fields — optional because GLM often returns only the
+  // translation. They're nice-to-have for the UI, not load-bearing.
+  speaker: z
+    .enum(["user", "other-person"])
+    .describe("Who is speaking this message — determines translation direction and pronoun/honorific choice")
+    .optional(),
+  register: z
+    .string()
+    .describe("The level of formality/respect chosen for this relationship (e.g. formal, polite, casual, intimate) and why it fits")
+    .optional(),
+  honorificsUsed: z
+    .string()
+    .describe("The specific honorifics, pronouns, and address terms used, appropriate for the relationship")
+    .optional(),
+  referents: z
+    .string()
+    .describe("Third parties mentioned in the message (not the speaker or listener). For each: who they are according to the persona context, their relationship to the LISTENER, and the correct kinship/address term to refer to them from the listener's perspective. The translation MUST use exactly this term. 'none' if no third parties are mentioned")
+    .optional(),
 })
 
 export type TranslationDebug = Omit<z.infer<typeof TranslationResult>, "translation">
@@ -123,18 +129,76 @@ export async function translate(
     { role: "user", content: `${speakerLabel} ${input}` },
   ]
 
-  const response = await client.chat.completions.parse({
+  const response = await client.chat.completions.create({
     model: MODEL,
     messages,
     temperature: 0.3,
-    response_format: zodResponseFormat(TranslationResult, "translation_result"),
-    reasoning_effort: "none",
-    thinking: { type: "disabled" }
+    // GLM often ignores response_format and wraps JSON in ```json fences, so we
+    // don't rely on the SDK's structured-output parsing. We strip fences and parse
+    // the raw content ourselves (see extractJson below).
+    ...(IS_ZAI
+      ? { response_format: { type: "json_object" } as const, reasoning_effort: "none", thinking: { type: "disabled" } }
+      : {}),
   })
 
-  const parsed = response.choices[0]?.message?.parsed
+  const raw = response.choices[0]?.message?.content ?? ""
+  const parsed = parseTranslation(raw)
   if (!parsed) return { translation: "", debug: null }
 
   const { translation, ...debug } = parsed
   return { translation: translation.trim(), debug }
+}
+
+/**
+ * GLM frequently wraps JSON in ```json ... ``` fences or adds stray prose around it.
+ * Extract the first {...} block and parse it; fall back to a direct parse.
+ */
+function extractJson(text: string): unknown | null {
+  const trimmed = text.trim()
+  try {
+    return JSON.parse(trimmed)
+  } catch {}
+
+  // Strip a leading ```json / ``` fence if present
+  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fenceMatch) {
+    try {
+      return JSON.parse(fenceMatch[1].trim())
+    } catch {}
+  }
+
+  // Grab the outermost { ... } span
+  const start = trimmed.indexOf("{")
+  const end = trimmed.lastIndexOf("}")
+  if (start !== -1 && end !== -1 && end > start) {
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1))
+    } catch {}
+  }
+  return null
+}
+
+// GLM doesn't use a stable key name for the translated text — it has been seen
+// returning "translation", "answer", "text", etc. Map any of these to "translation".
+const TRANSLATION_KEYS = ["translation", "answer", "translated_text", "translatedText", "output", "text", "result", "message"]
+
+function parseTranslation(text: string) {
+  const json = extractJson(text)
+
+  // Bare string response — treat it as the translation directly.
+  if (typeof json === "string" && json.trim()) {
+    return { translation: json.trim() }
+  }
+
+  if (!json || typeof json !== "object") return null
+  const obj = json as Record<string, unknown>
+
+  // Normalize alias keys → "translation"
+  if (typeof obj.translation !== "string") {
+    const alias = TRANSLATION_KEYS.find((k) => k !== "translation" && typeof obj[k] === "string")
+    if (alias) obj.translation = obj[alias]
+  }
+
+  const result = TranslationResult.safeParse(obj)
+  return result.success ? result.data : null
 }

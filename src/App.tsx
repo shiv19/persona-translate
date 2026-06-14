@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from "react"
-import type { Screen, Persona, Message } from "./types"
+import type { Screen, Persona } from "./types"
 import { uid } from "./types"
 import { loadPersonas, savePersonas, loadMessages, deletePersona as removePersona } from "./storage"
-import { PersonaList } from "./components/PersonaList"
+import { PersonaList, PersonaEmptyMain } from "./components/PersonaList"
 import { PersonaForm } from "./components/PersonaForm"
 import { TranslationChat } from "./components/TranslationChat"
 
@@ -63,9 +63,7 @@ export default function App() {
   }
 
   function handleUpdatePersona(personaId: string, data: Omit<Persona, "id" | "createdAt">) {
-    const updated = personas.map((p) =>
-      p.id === personaId ? { ...p, ...data } : p,
-    )
+    const updated = personas.map((p) => (p.id === personaId ? { ...p, ...data } : p))
     savePersonas(updated)
     setPersonas(updated)
     navigate({ view: "chat", personaId })
@@ -74,6 +72,10 @@ export default function App() {
   function handleDeletePersona(personaId: string) {
     removePersona(personaId)
     refresh()
+    // If we're viewing the deleted persona, drop back to the empty main pane.
+    if (screen.view === "chat" && screen.personaId === personaId) {
+      navigate({ view: "home" })
+    }
   }
 
   function getPersona(id: string): Persona | undefined {
@@ -85,56 +87,115 @@ export default function App() {
     navigate({ view: "home" })
   }
 
-  if (screen.view === "home") {
+  // Active persona id is used to highlight the sidebar item on desktop.
+  const activePersonaId =
+    screen.view === "chat" || screen.view === "edit-persona" ? screen.personaId : undefined
+
+  // Render the currently active screen into the main pane.
+  function renderMain() {
+    if (screen.view === "home") {
+      // On desktop the sidebar is always visible, so the main pane shows an empty state.
+      // On mobile this PersonaList is the home screen.
+      return (
+        <PersonaList
+          personas={personas}
+          onSelect={(id) => navigate({ view: "chat", personaId: id })}
+          onCreate={() => navigate({ view: "create-persona" })}
+          onEdit={(id) => navigate({ view: "edit-persona", personaId: id })}
+          onDelete={handleDeletePersona}
+        />
+      )
+    }
+
+    if (screen.view === "create-persona") {
+      return <PersonaForm onSave={handleCreatePersona} onCancel={() => navigate({ view: "home" })} />
+    }
+
+    if (screen.view === "edit-persona") {
+      const persona = getPersona(screen.personaId)
+      if (!persona) {
+        navigate({ view: "home" })
+        return null
+      }
+      return (
+        <PersonaForm
+          persona={persona}
+          onSave={(data) => handleUpdatePersona(screen.personaId, data)}
+          onCancel={() => navigate({ view: "chat", personaId: screen.personaId })}
+        />
+      )
+    }
+
+    if (screen.view === "chat") {
+      const persona = getPersona(screen.personaId)
+      if (!persona) {
+        navigate({ view: "home" })
+        return null
+      }
+      return <TranslationChat key={persona.id} persona={persona} onBack={goHome} />
+    }
+
+    return null
+  }
+
+  // Empty personas: just show the (page-variant) PersonaList. On desktop the sidebar
+  // still renders with its own empty state inside the list area.
+  if (personas.length === 0) {
     return (
+      <div className="app-shell">
+        <PersonaList
+          personas={personas}
+          onSelect={() => {}}
+          onCreate={() => navigate({ view: "create-persona" })}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          variant="sidebar"
+        />
+        <main className="app-main">
+          <PersonaList
+            personas={personas}
+            onSelect={() => {}}
+            onCreate={() => navigate({ view: "create-persona" })}
+            onEdit={() => {}}
+            onDelete={() => {}}
+          />
+        </main>
+      </div>
+    )
+  }
+
+  return (
+    <div className="app-shell">
+      {/* Sidebar: hidden on mobile (<768px) via CSS, always present on desktop */}
       <PersonaList
         personas={personas}
         onSelect={(id) => navigate({ view: "chat", personaId: id })}
         onCreate={() => navigate({ view: "create-persona" })}
         onEdit={(id) => navigate({ view: "edit-persona", personaId: id })}
         onDelete={handleDeletePersona}
+        variant="sidebar"
+        activePersonaId={activePersonaId}
       />
-    )
-  }
-
-  if (screen.view === "create-persona") {
-    return (
-      <PersonaForm
-        onSave={handleCreatePersona}
-        onCancel={() => navigate({ view: "home" })}
-      />
-    )
-  }
-
-  if (screen.view === "edit-persona") {
-    const persona = getPersona(screen.personaId)
-    if (!persona) {
-      navigate({ view: "home" })
-      return null
-    }
-    return (
-      <PersonaForm
-        persona={persona}
-        onSave={(data) => handleUpdatePersona(screen.personaId, data)}
-        onCancel={() => navigate({ view: "chat", personaId: screen.personaId })}
-      />
-    )
-  }
-
-  if (screen.view === "chat") {
-    const persona = getPersona(screen.personaId)
-    if (!persona) {
-      navigate({ view: "home" })
-      return null
-    }
-    return (
-      <TranslationChat
-        key={persona.id}
-        persona={persona}
-        onBack={goHome}
-      />
-    )
-  }
-
-  return null
+      <main className="app-main">
+        {screen.view === "home" ? (
+          <>
+            {/* Mobile: the full home screen. Desktop: hidden (sidebar is the picker). */}
+            <div className="home-mobile-only">
+              <PersonaList
+                personas={personas}
+                onSelect={(id) => navigate({ view: "chat", personaId: id })}
+                onCreate={() => navigate({ view: "create-persona" })}
+                onEdit={(id) => navigate({ view: "edit-persona", personaId: id })}
+                onDelete={handleDeletePersona}
+              />
+            </div>
+            {/* Desktop: empty placeholder since the sidebar handles picking. */}
+            <PersonaEmptyMain />
+          </>
+        ) : (
+          renderMain()
+        )}
+      </main>
+    </div>
+  )
 }

@@ -28,10 +28,10 @@ export interface Message {
 }
 
 export interface TranslationDebug {
-  speaker: string
-  register: string
-  honorificsUsed: string
-  referents: string
+  speaker?: string
+  register?: string
+  honorificsUsed?: string
+  referents?: string
 }
 
 export function uid(): string {
