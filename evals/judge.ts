@@ -70,25 +70,36 @@ export async function judgeTranslation(opts: JudgeInput): Promise<JudgeVerdict> 
   const speaker = speakerIsUser ? "the user (English speaker)" : `${opts.persona.name} (${opts.persona.targetLanguage} speaker)`
   const listener = speakerIsUser ? `${opts.persona.name} (${opts.persona.targetLanguage} speaker)` : "the user (English speaker)"
 
+  // The input/output languages depend on direction. State them explicitly so
+  // the judge never has to infer which language the output should be in.
+  const inputLang = speakerIsUser ? opts.persona.sourceLanguage : opts.persona.targetLanguage
+  const expectedOutputLang = speakerIsUser ? opts.persona.targetLanguage : opts.persona.sourceLanguage
+
   const prompt = `You are a strict, expert evaluator of ${opts.persona.targetLanguage} translations. You know the language's honorific and kinship systems natively.
 
 CONTEXT:
-- Source language: ${opts.persona.sourceLanguage}
-- Target language: ${opts.persona.targetLanguage}
+- Input language: ${inputLang}
+- Expected output language: ${expectedOutputLang}
 - Speaker: ${speaker}
 - Listener: ${listener}
 - Speaker↔Listener relationship: ${opts.persona.relationship}
 - Reverse relationship: ${opts.persona.reverseRelationship}
-- Address term configured by the user: ${opts.persona.addressTerm ?? "(none — derive from relationship)"}
+- Address term configured by the user: ${opts.persona.addressTerm ?? "(none — derive from relationship)"} — note: this is how the USER addresses the persona; the persona may use a DIFFERENT term when addressing the user.
 - Extra persona context: ${opts.persona.context}
 
-ORIGINAL (input): ${opts.input}
-TRANSLATION (output under test): ${opts.output}
+ORIGINAL INPUT (${inputLang}): ${opts.input}
+TRANSLATION UNDER TEST: ${opts.output}
 
 RUBRIC — score whether the translation satisfies THIS criterion:
 ${opts.rubric}
 
-Score 1 only if the rubric is fully satisfied. Score 0.5 if it is ambiguous or partially satisfied. Score 0 if it is violated. Be strict — do not give credit for a correct-but-different choice if the rubric specifies a concrete requirement. Cite the exact term(s) from the translation in your rationale.`
+EVALUATION PROCEDURE (follow this order exactly):
+1. CHECK THE OUTPUT LANGUAGE FIRST. The output must be in ${expectedOutputLang}. If it is in the same language as the input, score 0 immediately — this is a hard failure regardless of the rubric.
+2. Evaluate the rubric. The translation's address terms and kinship choices are CORRECT if they match the direction: when the persona speaks, they use their own kinship system to address the user — this may differ from the user's configured addressTerm, and that difference is correct, not an error.
+3. Before scoring, state your conclusion in one sentence (e.g. "The output is in English and preserves the source meaning → rubric satisfied").
+4. Your score MUST agree with your conclusion in step 3. If you concluded the rubric is satisfied, score 1 — do not contradict yourself.
+
+Score 1 = rubric satisfied. Score 0.5 = ambiguous/partial. Score 0 = violated. Cite the exact term(s) from the translation in your rationale.`
 
   const response = await withRetry(() =>
     client().chat.completions.create({

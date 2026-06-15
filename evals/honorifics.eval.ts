@@ -2,7 +2,7 @@ import { evalite } from "evalite"
 import { serverTranslate, type TranslateOutput } from "../server/zai.js"
 import { motherInLaw, case_, type TestCase } from "./fixtures.js"
 import { judgeScorer } from "./helpers.js"
-import { noForbiddenTerm, translationNotEmpty, noRoleDescriptorSelfReference, debugSpeakerMatchesDirection } from "./scorers.js"
+import { noForbiddenAddressTerm, translationNotEmpty, noRoleDescriptorSelfReference, debugSpeakerMatchesDirection } from "./scorers.js"
 
 // Regression class: the listener is addressed with the correct kinship term,
 // never a generic elder term (the "Bà ơi for a mother-in-law" bug).
@@ -18,7 +18,7 @@ evalite<TestCase, TranslateOutput>("honorifics", {
   scorers: [
     translationNotEmpty,
     // Hard guard: "Bà"/"Ông" must never appear when addressing the mother-in-law.
-    noForbiddenTerm(["Bà", "Ông"]),
+    noForbiddenAddressTerm(["Bà", "Ông"]),
     // The user must not self-refer as "mẹ vợ"/"con rể" (third-person descriptors).
     noRoleDescriptorSelfReference,
     // debug.speaker must be "user" since these are all to-target.

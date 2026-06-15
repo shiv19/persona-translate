@@ -2,7 +2,7 @@ import { evalite } from "evalite"
 import { serverTranslate, type TranslateOutput } from "../server/zai.js"
 import { motherInLaw, case_, type TestCase } from "./fixtures.js"
 import { judgeScorer } from "./helpers.js"
-import { translationNotEmpty, noDismissiveClassifier } from "./scorers.js"
+import { translationNotEmpty } from "./scorers.js"
 
 // Regression class: third parties mentioned in the message must be referred to
 // with the kinship term matching their relationship to the LISTENER. Catches
@@ -19,8 +19,6 @@ evalite<TestCase, TranslateOutput>("referents", {
   },
   scorers: [
     translationNotEmpty,
-    // Deterministic: no "thằng <Name>" / "con <Name>" dismissive classifiers.
-    noDismissiveClassifier,
     judgeScorer(
       "Third parties (not the speaker or listener) must be referred to using the kinship term matching their relationship to the LISTENER. 'Senku' is the listener's grandson → must use 'cháu' (Vietnamese), never a dismissive classifier like 'thằng' or 'con'. 'Kelly' is the listener's daughter → use the daughter kinship term. Score 0 if a dismissive/generic classifier is used for the listener's own family.",
     ),

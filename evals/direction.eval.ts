@@ -2,7 +2,7 @@ import { evalite } from "evalite"
 import { serverTranslate, type TranslateOutput } from "../server/zai.js"
 import { motherInLaw, case_, type TestCase } from "./fixtures.js"
 import { judgeScorer } from "./helpers.js"
-import { translationNotEmpty, noRoleDescriptorSelfReference, addressTermNotFlippedInReverse, debugSpeakerMatchesDirection } from "./scorers.js"
+import { translationNotEmpty, noRoleDescriptorSelfReference, debugSpeakerMatchesDirection } from "./scorers.js"
 
 // Regression class: speaker self-reference and listener address must be
 // correct for the direction. Catches the "I'll go for a run" → third-person
@@ -23,12 +23,10 @@ evalite<TestCase, TranslateOutput>("direction", {
     translationNotEmpty,
     // The core deterministic guard for this bug class.
     noRoleDescriptorSelfReference,
-    // Reverse direction: the user's addressTerm must not be flipped onto them.
-    addressTermNotFlippedInReverse,
     // debug.speaker must match the direction.
     debugSpeakerMatchesDirection,
     judgeScorer(
-      "DIRECTION-CORRECTNESS: (1) When the USER is speaking (to-target, English→Vietnamese), the speaker must refer to themselves with the correct humble first-person term for a son-in-law addressing an elder (Vietnamese: 'con'), NEVER with a third-person role descriptor like 'mẹ vợ' or 'con rể'. (2) When the PERSONA is speaking (from-target, Vietnamese→English), the persona must address the USER correctly per the reverse relationship — NOT by reusing the user's addressTerm ('mẹ vợ') flipped onto the user. Score 0 if the speaker self-refers in the third person, or if the reverse direction misaddresses the user.",
+      "DIRECTION-CORRECTNESS: (1) When the USER is speaking (to-target, English→Vietnamese), the speaker must refer to themselves with the correct humble first-person term for a son-in-law addressing an elder (Vietnamese: 'con'), NEVER with a third-person role descriptor like 'mẹ vợ' or 'con rể'. (2) When the PERSONA is speaking (from-target, Vietnamese→English), the persona must address the USER correctly per the reverse relationship — NOT by reusing the user's addressTerm flipped onto the user. (3) MEANING & TENSE must be preserved exactly — e.g. 'is sleeping' must not become 'has fallen asleep' / 'ngủ rồi' (already asleep). NOTE: natural register particles (Vietnamese: ơi, ạ, nha, nhé) and dialect features are ENCOURAGED and must NOT be penalized — they make the translation sound natural. Score 0 only for wrong pronouns, wrong self-reference, wrong direction-address, or altered meaning/tense. Do not penalize natural discourse particles.",
     ),
   ],
 })

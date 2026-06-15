@@ -133,7 +133,7 @@ function buildPeopleRoster(persona: Persona, direction: "to-target" | "from-targ
     const relation = speakerIsUser
       ? p.relationToListener
       : (p.relationToSpeaker || p.relationToListener)
-    return `- ${p.name} — ${listenerName}'s ${relation}${note} → when mentioned, use the kinship/address term for "${relation}" from ${listenerName}'s perspective`
+    return `- ${p.name} — ${listenerName}'s ${relation}${note} → when mentioned in the translation, the kinship term for "${relation}" MUST be attached to their name (e.g. Vietnamese daughter → "con [Name]", grandson → "cháu [Name]"). Do NOT use the bare name alone — the kinship term is required.`
   })
 
   return `
@@ -191,8 +191,11 @@ Context:
 IMPORTANT RULES:
 1. DETECT THE INPUT LANGUAGE and translate INTO THE OTHER language — never echo the input language. If the input is ${persona.sourceLanguage}, output ${persona.targetLanguage}. If the input is ${persona.targetLanguage}, output ${persona.sourceLanguage}.
 2. PRONOUNS ARE DIRECTION-RELATIVE: The term for addressing the listener is in "HOW TO ADDRESS THE LISTENER" above. The speaker's self-reference is in "FIRST-PERSON SELF-REFERENCE". These are generally DIFFERENT terms. Never confuse speaker-self with listener-address.
-3. CONCISE & NATURAL: Translate what was said — nothing more. No added pleasantries, no expansions. Match the source's length and tone.
-4. When the message mentions OTHER PEOPLE (not the speaker or listener), check the people roster first (it is authoritative). Refer to them using the KINSHIP TERM matching their relationship to the LISTENER. NEVER use dismissive classifiers (Vietnamese: never "thằng"/"con" for the listener's family — use "cháu"/"bé").
+3. FAITHFUL MEANING, NATURAL REGISTER:
+   a. PRESERVE MEANING & TENSE EXACTLY. "is sleeping" ≠ "has fallen asleep" / "is already asleep" (Vietnamese: "đang ngủ" ≠ "ngủ rồi"). Match the source's tense and factual claims precisely — do not shift them to make the sentence "sound better".
+   b. DO NOT ADD OR DROP INFORMATION. Every claim in the source appears in the translation; nothing in the translation was invented. No added pleasantries, greetings, or facts the speaker didn't state.
+   c. NATURAL REGISTER IS ENCOURAGED. DO add the sentence-final particles, softeners, and natural discourse markers that a native speaker would use in this relationship and dialect (Vietnamese: "ạ", "nha", "nhé", "ơi" when directly addressing, Central Vietnamese dialect features, etc.). The goal is a translation that sounds like a real person talking — not stiff or textbook-like. This applies to HOW things are said, never to WHAT is said.
+4. REFERENTS — THIRD-PARTY KINSHIP TERMS ARE MANDATORY. When the message mentions other people (not the speaker or listener), check the people roster. You MUST attach the kinship term matching their relationship to the LISTENER to their name — e.g. if the listener's daughter Kelly is mentioned, write "con Kelly" (Vietnamese), NEVER the bare name "Kelly" alone. If the listener's grandson Senku is mentioned, write "cháu Senku", NEVER "thằng Senku" or the bare name. The kinship prefix is non-optional: it signals the family bond from the listener's perspective. Use it even when the name alone would be "understandable".
 5. Earlier messages may contain mistakes. Re-derive all pronouns and address terms from these rules every time — never copy from history.
 6. You MUST return your result by calling the record_translation tool. Fill every field: decide speaker, address term, self-reference, register, and referents FIRST (committing to the correct kinship terms before translating), then produce the translation. The "translation" field contains only the translated text.`
 }
