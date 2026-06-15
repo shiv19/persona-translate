@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import type { Screen, Persona } from "./types"
 import { uid } from "./types"
-import { loadPersonas, savePersonas, loadMessages, deletePersona as removePersona } from "./storage"
+import { loadPersonas, savePersonas, deletePersona as removePersona } from "./storage"
 import { PersonaList, PersonaEmptyMain } from "./components/PersonaList"
 import { PersonaForm } from "./components/PersonaForm"
 import { TranslationChat } from "./components/TranslationChat"
@@ -15,7 +15,6 @@ export default function App() {
     return { view: "home" }
   })
   const [personas, setPersonas] = useState<Persona[]>(() => loadPersonas())
-  const [, setTick] = useState(0)
   const pushing = useRef(false)
 
   const navigate = useCallback((next: Screen) => {
@@ -47,7 +46,6 @@ export default function App() {
 
   function refresh() {
     setPersonas(loadPersonas())
-    setTick((t) => t + 1)
   }
 
   function handleCreatePersona(data: Omit<Persona, "id" | "createdAt">) {
@@ -91,6 +89,17 @@ export default function App() {
   const activePersonaId =
     screen.view === "chat" || screen.view === "edit-persona" ? screen.personaId : undefined
 
+  // If we land on a chat/edit screen whose persona no longer exists, redirect
+  // home. Done as an effect (not during render) to avoid setState-in-render.
+  useEffect(() => {
+    if (
+      (screen.view === "chat" || screen.view === "edit-persona") &&
+      !getPersona(screen.personaId)
+    ) {
+      navigate({ view: "home" })
+    }
+  }, [screen, personas])
+
   // Render the currently active screen into the main pane.
   function renderMain() {
     if (screen.view === "home") {
@@ -113,10 +122,7 @@ export default function App() {
 
     if (screen.view === "edit-persona") {
       const persona = getPersona(screen.personaId)
-      if (!persona) {
-        navigate({ view: "home" })
-        return null
-      }
+      if (!persona) return null
       return (
         <PersonaForm
           persona={persona}
@@ -128,19 +134,16 @@ export default function App() {
 
     if (screen.view === "chat") {
       const persona = getPersona(screen.personaId)
-      if (!persona) {
-        navigate({ view: "home" })
-        return null
-      }
+      if (!persona) return null
       return <TranslationChat key={persona.id} persona={persona} onBack={goHome} />
     }
 
     return null
   }
 
-  // Empty personas: just show the (page-variant) PersonaList. On desktop the sidebar
-  // still renders with its own empty state inside the list area.
-  if (personas.length === 0) {
+  // Empty personas: show the empty-state PersonaList, unless we're already on
+  // a screen like create-persona (which renders the form via renderMain).
+  if (personas.length === 0 && screen.view === "home") {
     return (
       <div className="app-shell">
         <PersonaList

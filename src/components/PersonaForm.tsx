@@ -36,6 +36,7 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
   const [sourceLanguage, setSourceLanguage] = useState(persona?.sourceLanguage ?? "English")
   const [relationship, setRelationship] = useState(persona?.relationship ?? "")
   const [reverseRelationship, setReverseRelationship] = useState(persona?.reverseRelationship ?? "")
+  const [addressTerm, setAddressTerm] = useState(persona?.addressTerm ?? "")
   const [context, setContext] = useState(persona?.context ?? "")
   const [people, setPeople] = useState<PersonaPerson[]>(persona?.people ?? [])
 
@@ -46,6 +47,7 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
       setSourceLanguage(persona.sourceLanguage)
       setRelationship(persona.relationship)
       setReverseRelationship(persona.reverseRelationship ?? "")
+      setAddressTerm(persona.addressTerm ?? "")
       setContext(persona.context)
       setPeople(persona.people ?? [])
     }
@@ -66,7 +68,16 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const cleanedPeople = people.filter((p) => p.name.trim() && p.relationToListener.trim())
-    onSave({ name, targetLanguage, sourceLanguage, relationship, reverseRelationship, context, people: cleanedPeople })
+    onSave({
+      name,
+      targetLanguage,
+      sourceLanguage,
+      relationship,
+      reverseRelationship,
+      addressTerm: addressTerm.trim() || undefined,
+      context,
+      people: cleanedPeople,
+    })
   }
 
   return (
@@ -143,6 +154,20 @@ export function PersonaForm({ persona, onSave, onCancel }: Props) {
           />
           <span className="form-hint">
             How {name || "this person"} sees you — used when they are speaking so pronouns/honorifics are correct from their side
+          </span>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="addressTerm">How you address them (optional)</label>
+          <input
+            id="addressTerm"
+            type="text"
+            placeholder={`e.g., Mẹ, Bác 3, Chị ${name || "Hương"}`}
+            value={addressTerm}
+            onChange={(e) => setAddressTerm(e.target.value)}
+          />
+          <span className="form-hint">
+            The exact word you use to address {name || "this person"} in {targetLanguage || "their language"}. When set, the translator always uses this term and never substitutes it — useful when a relationship is ambiguous (e.g. mother-in-law → "Mẹ", not "Bà").
           </span>
         </div>
 

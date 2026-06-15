@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import type { Persona, Message } from "../types"
 import { uid } from "../types"
-import { translate } from "../ai"
+import { translate, MAX_HISTORY } from "../ai"
 import { loadMessages, saveMessage, clearMessages, deleteMessage } from "../storage"
 import { ArrowLeft, Trash2, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft, X, Repeat } from "lucide-react"
 
@@ -30,12 +30,17 @@ const LANG_MAP: Record<string, string> = {
   english: "en-US",
 }
 
-function resolveLangCode(language: string): string {
+// Resolve a free-text language (e.g. "Vietnamese", "Brazilian Portuguese")
+// to a BCP-47 tag the synth will accept. Returns undefined if we can't map it
+// to something the speech engine actually understands, so the caller can fall
+// back to the synth's default instead of feeding it garbage like
+// "brazilian portuguese".
+function resolveLangCode(language: string): string | undefined {
   const lower = language.toLowerCase().trim()
   for (const [key, code] of Object.entries(LANG_MAP)) {
     if (lower.includes(key)) return code
   }
-  return lower
+  return undefined
 }
 
 interface Props {
@@ -47,11 +52,15 @@ export function TranslationChat({ persona, onBack }: Props) {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages(persona.id))
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [showConfirmClear, setShowConfirmClear] = useState(false)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [pendingText, setPendingText] = useState<string | null>(null)
   const [direction, setDirection] = useState<"to-target" | "from-target">("to-target")
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(() =>
+    typeof window !== "undefined" ? window.speechSynthesis.getVoices() : [],
+  )
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -66,6 +75,16 @@ export function TranslationChat({ persona, onBack }: Props) {
     }
   }, [])
 
+  // getVoices() returns [] until the synth finishes loading. Listen for the
+  // voiceschanged event so voice matching works on first render after load.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return
+    const sync = () => setVoices(window.speechSynthesis.getVoices())
+    sync()
+    window.speechSynthesis.addEventListener("voiceschanged", sync)
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", sync)
+  }, [])
+
   function handleSpeak(text: string, messageId: string, msgDirection: "to-target" | "from-target") {
     if (playingId === messageId) {
       stopSpeech()
@@ -77,13 +96,17 @@ export function TranslationChat({ persona, onBack }: Props) {
     const utterance = new SpeechSynthesisUtterance(text)
     const ttsLang = msgDirection === "to-target" ? persona.targetLanguage : persona.sourceLanguage
     const langCode = resolveLangCode(ttsLang)
-    utterance.lang = langCode
+
+    // Prefer an actually-installed voice for this language. Fall back to the
+    // synth default only if we mapped a real BCP-47 tag; never hand it a
+    // garbage string that the synth will reject.
+    if (langCode) {
+      utterance.lang = langCode
+      const match = voices.find((v) => v.lang.startsWith(langCode.split("-")[0]))
+      if (match) utterance.voice = match
+    }
+
     utterance.rate = 0.9
-
-    const voices = window.speechSynthesis.getVoices()
-    const match = voices.find((v) => v.lang.startsWith(langCode.split("-")[0]))
-    if (match) utterance.voice = match
-
     utterance.onend = () => setPlayingId(null)
     utterance.onerror = () => setPlayingId(null)
 
@@ -106,6 +129,7 @@ export function TranslationChat({ persona, onBack }: Props) {
     setInput("")
     setPendingText(text)
     setLoading(true)
+    setError(null)
 
     try {
       const { translation, debug } = await translate(persona, text, messages, direction)
@@ -123,19 +147,14 @@ export function TranslationChat({ persona, onBack }: Props) {
       saveMessage(msg)
       setMessages((prev) => [...prev, msg])
     } catch (err) {
-      const errorMsg: Message = {
-        id: uid(),
-        personaId: persona.id,
-        original: text,
-        translation: `Error: ${err instanceof Error ? err.message : "Translation failed"}`,
-        direction,
-        createdAt: Date.now(),
-      }
-      saveMessage(errorMsg)
-      setMessages((prev) => [...prev, errorMsg])
+      // Errors are ephemeral UI state — never persisted, never fed back to the
+      // model as history. Restore the input so the user can retry/edit.
+      const message = err instanceof Error ? err.message : "Translation failed"
+      setError(message)
+      setInput(text)
+      setPendingText(null)
     } finally {
       setLoading(false)
-      setPendingText(null)
       inputRef.current?.focus()
     }
   }
@@ -167,7 +186,7 @@ export function TranslationChat({ persona, onBack }: Props) {
   return (
     <div className="screen chat-screen">
       <header className="chat-header">
-        <button className="btn btn-ghost back-mobile-only" onClick={onBack}>
+        <button className="btn btn-ghost back-mobile-only" onClick={onBack} aria-label="Back to personas">
           <ArrowLeft size={20} />
         </button>
         <div className="chat-header-info">
@@ -181,6 +200,7 @@ export function TranslationChat({ persona, onBack }: Props) {
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => setShowConfirmClear(!showConfirmClear)}
+              aria-label="Clear all messages"
             >
               <Trash2 size={16} />
             </button>
@@ -200,6 +220,15 @@ export function TranslationChat({ persona, onBack }: Props) {
         </div>
       )}
 
+      {error && (
+        <div className="clear-banner error-banner" role="alert">
+          <span>{error}</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setError(null)} aria-label="Dismiss error">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       <div className="chat-messages">
         {messages.length === 0 && (
           <div className="chat-empty">
@@ -208,7 +237,7 @@ export function TranslationChat({ persona, onBack }: Props) {
               <strong>{persona.targetLanguage}</strong> below.
             </p>
             <p className="chat-empty-hint">
-              The last {5} messages are included as context for better translations.
+              The last {MAX_HISTORY} messages are included as context for better translations.
             </p>
           </div>
         )}
@@ -223,6 +252,8 @@ export function TranslationChat({ persona, onBack }: Props) {
                     className={`btn btn-ghost btn-sm btn-speak ${playingId === `orig-${msg.id}` ? "speaking" : ""}`}
                     onClick={() => handleSpeak(msg.original, `orig-${msg.id}`, msg.direction === "to-target" ? "from-target" : "to-target")}
                     title={playingId === `orig-${msg.id}` ? "Stop" : "Play aloud"}
+                    aria-label={playingId === `orig-${msg.id}` ? "Stop playback" : "Play original aloud"}
+                    aria-pressed={playingId === `orig-${msg.id}`}
                   >
                     {playingId === `orig-${msg.id}` ? <VolumeX size={16} /> : <Volume2 size={16} />}
                   </button>
@@ -230,6 +261,7 @@ export function TranslationChat({ persona, onBack }: Props) {
                     className="btn btn-ghost btn-sm"
                     onClick={() => handleCopy(msg.original, `orig-${msg.id}`)}
                     title="Copy"
+                    aria-label={copiedId === `orig-${msg.id}` ? "Copied" : "Copy original"}
                   >
                     {copiedId === `orig-${msg.id}` ? <Check size={16} /> : <Copy size={16} />}
                   </button>
@@ -245,6 +277,8 @@ export function TranslationChat({ persona, onBack }: Props) {
                     className={`btn btn-ghost btn-sm btn-speak ${playingId === msg.id ? "speaking" : ""}`}
                     onClick={() => handleSpeak(msg.translation, msg.id, msg.direction)}
                     title={playingId === msg.id ? "Stop" : "Play aloud"}
+                    aria-label={playingId === msg.id ? "Stop playback" : "Play translation aloud"}
+                    aria-pressed={playingId === msg.id}
                   >
                     {playingId === msg.id ? <VolumeX size={16} /> : <Volume2 size={16} />}
                   </button>
@@ -252,6 +286,7 @@ export function TranslationChat({ persona, onBack }: Props) {
                     className="btn btn-ghost btn-sm"
                     onClick={() => handleCopy(msg.translation, msg.id)}
                     title="Copy"
+                    aria-label={copiedId === msg.id ? "Copied" : "Copy translation"}
                   >
                     {copiedId === msg.id ? <Check size={16} /> : <Copy size={16} />}
                   </button>
@@ -259,6 +294,7 @@ export function TranslationChat({ persona, onBack }: Props) {
                     className="btn btn-ghost btn-sm btn-danger"
                     onClick={() => handleDeleteTurn(msg.id)}
                     title="Delete this turn"
+                    aria-label="Delete this turn"
                   >
                     <X size={16} />
                   </button>
@@ -332,6 +368,7 @@ export function TranslationChat({ persona, onBack }: Props) {
             className="btn btn-primary chat-send-btn"
             onClick={handleSend}
             disabled={loading || !input.trim()}
+            aria-label="Send message"
           >
             {loading ? "..." : <SendHorizontal size={20} />}
           </button>
@@ -340,6 +377,12 @@ export function TranslationChat({ persona, onBack }: Props) {
           className={`btn btn-ghost chat-speaker-toggle ${direction === "from-target" ? "toggled" : ""}`}
           onClick={() => setDirection(direction === "to-target" ? "from-target" : "to-target")}
           title={direction === "to-target" ? "Tap to switch to their voice" : "Tap to switch to your voice"}
+          aria-pressed={direction === "from-target"}
+          aria-label={
+            direction === "to-target"
+              ? `You speaking to ${persona.name}. Tap to switch to their voice.`
+              : `${persona.name} speaking to you. Tap to switch to your voice.`
+          }
         >
           <Repeat size={14} />
           <span className="speaker-label">

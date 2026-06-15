@@ -22,6 +22,13 @@ export function PersonaList({
 }: Props) {
   const isSidebar = variant === "sidebar"
 
+  // Wrap delete with a confirmation so it's not instant + irreversible — parity
+  // with the message-clear confirm in TranslationChat.
+  function confirmDelete(persona: Persona) {
+    const ok = window.confirm(`Delete "${persona.name}" and all its messages? This cannot be undone.`)
+    if (ok) onDelete(persona.id)
+  }
+
   if (isSidebar) {
     return (
       <div className="app-sidebar">
@@ -49,13 +56,14 @@ export function PersonaList({
                 </div>
               </div>
               <div className="persona-card-actions" onClick={(e) => e.stopPropagation()}>
-                <button className="btn btn-ghost btn-sm" onClick={() => onEdit(p.id)} title="Edit">
+                <button className="btn btn-ghost btn-sm" onClick={() => onEdit(p.id)} title="Edit" aria-label={`Edit ${p.name}`}>
                   <Pencil size={16} />
                 </button>
                 <button
                   className="btn btn-ghost btn-sm btn-danger"
-                  onClick={() => onDelete(p.id)}
+                  onClick={() => confirmDelete(p)}
                   title="Delete"
+                  aria-label={`Delete ${p.name}`}
                 >
                   <Trash2 size={16} />
                 </button>
@@ -107,13 +115,14 @@ export function PersonaList({
                   </div>
                 </div>
                 <div className="persona-card-actions" onClick={(e) => e.stopPropagation()}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => onEdit(p.id)} title="Edit">
+                  <button className="btn btn-ghost btn-sm" onClick={() => onEdit(p.id)} title="Edit" aria-label={`Edit ${p.name}`}>
                     <Pencil size={16} />
                   </button>
                   <button
                     className="btn btn-ghost btn-sm btn-danger"
-                    onClick={() => onDelete(p.id)}
+                    onClick={() => confirmDelete(p)}
                     title="Delete"
+                    aria-label={`Delete ${p.name}`}
                   >
                     <Trash2 size={16} />
                   </button>

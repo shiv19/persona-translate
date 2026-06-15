@@ -543,6 +543,10 @@ body {
   flex-shrink: 0;
 }
 
+.clear-banner > span:first-child {
+  flex: 1;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;

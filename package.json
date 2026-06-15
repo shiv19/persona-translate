@@ -3,9 +3,16 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "dev": "vite --port 3133",
-    "build": "tsc -b && vite build",
+    "dev": "concurrently -n vite,api -c cyan,magenta \"vite --port 3133\" \"tsx watch server/index.ts\"",
+    "dev:client": "vite --port 3133",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "tsc -b tsconfig.app.json && tsc -p server/tsconfig.json && vite build",
+    "start": "node server/dist/index.js",
+    "typecheck": "tsc -b tsconfig.app.json && tsc -p server/tsconfig.json --noEmit",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -16,9 +23,12 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/node": "^22.19.21",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.0"
   }

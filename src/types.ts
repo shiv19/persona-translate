@@ -6,6 +6,8 @@ export interface Persona {
   relationship: string
   reverseRelationship: string
   context: string
+  /** Optional explicit term the user uses to address this person (e.g. "Mẹ", "Bác 3"). When set, the translator treats it as authoritative. */
+  addressTerm?: string
   people?: PersonaPerson[]
   createdAt: number
 }
@@ -27,6 +29,8 @@ export interface Message {
   debug?: TranslationDebug | null
 }
 
+// Canonical definition of the translation debug shape. `ai.ts` re-exports this
+// so the two modules never diverge.
 export interface TranslationDebug {
   speaker?: string
   register?: string
