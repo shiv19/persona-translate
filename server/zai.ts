@@ -1,5 +1,6 @@
 import OpenAI from "openai"
 import { z } from "zod"
+import { withRetry } from "./retry.js"
 
 // Server-only: the API key lives in process.env and is NEVER sent to the browser.
 const BASE_URL = process.env.ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4"
@@ -65,31 +66,31 @@ export interface TranslationDebug {
 }
 
 // ---------------------------------------------------------------------------
-// Zod contract + parsing — moved verbatim from the old src/ai.ts.
+// Zod contract for the translation result.
+//
+// We use Function Calling (tools) rather than response_format: json_object,
+// because json_object only guarantees valid JSON — it does NOT enforce the
+// schema, so GLM-5.2 happily returns {"translation":"..."} and omits every
+// debug field. With tools, the model must populate arguments matching the
+// JSON Schema, so the debug fields actually come back populated.
 // ---------------------------------------------------------------------------
 
 const TranslationResult = z.object({
   translation: z
     .string()
     .describe("The final natural translation only — no notes, no romanization"),
-  // Debug/diagnostic fields — optional because GLM often returns only the
-  // translation. They're nice-to-have for the UI, not load-bearing.
   speaker: z
     .enum(["user", "other-person"])
-    .describe("Who is speaking this message — determines translation direction and pronoun/honorific choice")
-    .optional(),
+    .describe("Who is speaking this message — 'user' if the user is speaking, 'other-person' if the persona is speaking"),
   register: z
     .string()
-    .describe("The level of formality/respect chosen for this relationship (e.g. formal, polite, casual, intimate) and why it fits")
-    .optional(),
+    .describe("The level of formality/respect chosen for this relationship (e.g. formal, polite, casual, intimate) and a one-sentence reason it fits"),
   honorificsUsed: z
     .string()
-    .describe("The specific honorifics, pronouns, and address terms used, appropriate for the relationship")
-    .optional(),
+    .describe("The specific honorifics, pronouns, and address terms used in the translation. Explain the choices briefly."),
   referents: z
     .string()
-    .describe("Third parties mentioned in the message (not the speaker or listener). For each: who they are according to the persona context, their relationship to the LISTENER, and the correct kinship/address term to refer to them from the listener's perspective. The translation MUST use exactly this term. 'none' if no third parties are mentioned")
-    .optional(),
+    .describe("Third parties mentioned in the message (not the speaker or listener). For each: who they are, their relationship to the LISTENER, and the kinship/address term used. Write 'none' if no third parties are mentioned."),
 })
 
 export type TranslationDebugParsed = Omit<z.infer<typeof TranslationResult>, "translation">
@@ -97,6 +98,27 @@ export type TranslationDebugParsed = Omit<z.infer<typeof TranslationResult>, "tr
 export interface TranslateOutput {
   translation: string
   debug: TranslationDebugParsed | null
+}
+
+// The tool definition passed to the API. GLM is constrained to return
+// arguments matching this schema via tool_calls[0].function.arguments.
+const TRANSLATION_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "record_translation",
+    description: "Record the completed translation along with the linguistic choices made (speaker, register, honorifics, referents). You MUST call this tool to return your translation — do not output the translation as plain text.",
+    parameters: {
+      type: "object",
+      properties: {
+        translation: { type: "string", description: "The final natural translation only — no notes, no romanization" },
+        speaker: { type: "string", enum: ["user", "other-person"], description: "'user' if the user is speaking, 'other-person' if the persona is speaking" },
+        register: { type: "string", description: "The level of formality/respect chosen (e.g. formal, polite, casual, intimate) and a one-sentence reason it fits" },
+        honorificsUsed: { type: "string", description: "The specific honorifics, pronouns, and address terms used in the translation, with brief explanation" },
+        referents: { type: "string", description: "Third parties mentioned and the kinship/address terms used for them, or 'none'" },
+      },
+      required: ["translation", "speaker", "register", "honorificsUsed", "referents"],
+    },
+  },
 }
 
 function buildPeopleRoster(persona: Persona, direction: "to-target" | "from-target"): string {
@@ -128,14 +150,33 @@ function buildSystemPrompt(persona: Persona, direction: "to-target" | "from-targ
     ? `${persona.name}'s relationship to the user: ${persona.relationship}`
     : `The user's relationship to ${persona.name}: ${persona.reverseRelationship || persona.relationship}`
 
-  // The listener's address term is the single most important lexical choice in
-  // honorific languages. If the user supplied one explicitly, it is a HARD
-  // override — never substitute it. Otherwise derive it from the relationship
-  // and forbid generic elder fallbacks (the "Bà ơi for a mother-in-law" bug).
+  // addressTerm is listener-relative: it describes how the SPEAKER addresses the
+  // LISTENER. So in to-target (user→persona) it's how the user addresses the
+  // persona; in from-target (persona→user) it's how the persona addresses the
+  // user. We must attach it to whoever is actually the listener.
+  //
+  // The override is a USER preference for how *they* address the persona. We do
+  // NOT force the persona to use the same term in reverse — the persona uses the
+  // reverseRelationship to derive the correct term for the user.
   const addressOverride = persona.addressTerm?.trim()
-  const listenerAddressLine = addressOverride
-    ? `HOW TO ADDRESS THE LISTENER: Use the EXACT term "${addressOverride}" when directly addressing ${persona.name}. This is non-negotiable — do NOT substitute it with any other kinship term, pronoun, or generic honorific, even if the relationship description seems to suggest otherwise. (The user has explicitly chosen this term.)`
-    : `HOW TO ADDRESS THE LISTENER: Derive the correct ${persona.targetLanguage} kinship/address term for the listener from the relationship above. NEVER default to a generic elder term (Vietnamese: "Bà"/"Ông", Korean: "할머니"/"할아버지") when the relationship specifies a more precise one — e.g. a mother-in-law is addressed as "Mẹ" (or "mẹ vợ"/"mẹ chồng" per side), NOT "Bà". If you are unsure which specific term applies, prefer the kinship term over a generic one.`
+
+  let addressLine: string
+  if (speakerIsUser) {
+    // User is speaking → listener is the persona. addressTerm applies here.
+    addressLine = addressOverride
+      ? `HOW TO ADDRESS THE LISTENER (${persona.name}): When the user directly addresses ${persona.name}, use the EXACT term "${addressOverride}". Non-negotiable — never substitute it.`
+      : `HOW TO ADDRESS THE LISTENER (${persona.name}): Derive the correct ${persona.targetLanguage} kinship/address term for ${persona.name} from the relationship. NEVER default to a generic elder term (Vietnamese "Bà"/"Ông") when a precise kinship term exists — a mother-in-law is "Mẹ", not "Bà".`
+  } else {
+    // Persona is speaking → listener is the user. addressTerm does NOT apply
+    // (it was the user's choice for addressing the persona, not vice versa).
+    // The persona derives the user's term from reverseRelationship.
+    addressLine = `HOW TO ADDRESS THE LISTENER (the user): Derive the correct ${persona.targetLanguage} kinship/address term for the USER from "${persona.reverseRelationship || persona.relationship}". This is how ${persona.name} addresses the user — it is generally DIFFERENT from how the user addresses ${persona.name}.`
+  }
+
+  // First-person guidance: when a younger-generation speaker addresses an elder,
+  // they refer to themselves with the humble/younger term (Vietnamese "con"),
+  // NEVER with a third-person descriptor like "mẹ vợ" (wife's mother).
+  const firstPersonLine = `FIRST-PERSON SELF-REFERENCE: The speaker refers to THEMSELVES using the correct first-person pronoun for this relationship in ${persona.targetLanguage} — never in the third person, never by their role title. (Vietnamese: a younger speaker addressing an elder uses "con" for themselves, NOT "mẹ vợ"/"con rể" — those are descriptors others use about them, not words they call themselves.)`
 
   return `You are an expert translator specializing in ${persona.targetLanguage}.
 
@@ -143,16 +184,17 @@ The current message is spoken by ${speakerName} and addressed to ${listenerName}
 
 Context:
 - ${speakerRelationship}
-- ${listenerAddressLine}
+- ${addressLine}
+- ${firstPersonLine}
 - Additional context: ${persona.context}${buildPeopleRoster(persona, direction)}
 
 IMPORTANT RULES:
-1. DETECT THE INPUT LANGUAGE and translate INTO THE OTHER language — never echo the input language. If the input is ${persona.sourceLanguage}, output ${persona.targetLanguage}. If the input is ${persona.targetLanguage}, output ${persona.sourceLanguage}. The speaker label is only a hint about register; the actual text decides the source language.
-2. ADDRESS TERM: Every direct address in the translation MUST use the term from "HOW TO ADDRESS THE LISTENER" above.
-3. CONCISE & NATURAL: Translate what was said — nothing more. No added pleasantries, no expansions, no "brother/sister" insertions the speaker didn't say. Match the source's length and tone. A 4-word input should not become a 10-word translation.
-4. When the message mentions OTHER PEOPLE (not the speaker or listener), check the people roster first (it is authoritative), then the persona context. Refer to them using the KINSHIP TERM that matches their relationship to the LISTENER. NEVER use dismissive, distancing, or generic classifiers (in Vietnamese: never "thằng"/"con" for the listener's own family — use the kinship term like "cháu"/"bé" instead).
-5. Earlier messages in this conversation may contain translation mistakes. Do NOT copy pronoun or address-term choices from history — re-derive them from these rules every time.
-6. Respond with JSON. The "translation" field must contain only the translated text.`
+1. DETECT THE INPUT LANGUAGE and translate INTO THE OTHER language — never echo the input language. If the input is ${persona.sourceLanguage}, output ${persona.targetLanguage}. If the input is ${persona.targetLanguage}, output ${persona.sourceLanguage}.
+2. PRONOUNS ARE DIRECTION-RELATIVE: The term for addressing the listener is in "HOW TO ADDRESS THE LISTENER" above. The speaker's self-reference is in "FIRST-PERSON SELF-REFERENCE". These are generally DIFFERENT terms. Never confuse speaker-self with listener-address.
+3. CONCISE & NATURAL: Translate what was said — nothing more. No added pleasantries, no expansions. Match the source's length and tone.
+4. When the message mentions OTHER PEOPLE (not the speaker or listener), check the people roster first (it is authoritative). Refer to them using the KINSHIP TERM matching their relationship to the LISTENER. NEVER use dismissive classifiers (Vietnamese: never "thằng"/"con" for the listener's family — use "cháu"/"bé").
+5. Earlier messages may contain mistakes. Re-derive all pronouns and address terms from these rules every time — never copy from history.
+6. You MUST return your result by calling the record_translation tool. Fill every field: decide speaker, address term, self-reference, register, and referents FIRST (committing to the correct kinship terms before translating), then produce the translation. The "translation" field contains only the translated text.`
 }
 
 function buildHistoryMessages(persona: Persona, history: Message[]): OpenAI.Chat.ChatCompletionMessageParam[] {
@@ -192,24 +234,66 @@ export async function serverTranslate(
     { role: "user", content: `${speakerLabel} ${input}` },
   ]
 
-  const response = await client().chat.completions.create({
-    model: MODEL,
-    messages,
-    temperature: 0.3,
-    // GLM often ignores response_format and wraps JSON in ```json fences, so we
-    // don't rely on the SDK's structured-output parsing. We strip fences and parse
-    // the raw content ourselves (see extractJson below).
-    ...(IS_ZAI
-      ? { response_format: { type: "json_object" } as const, reasoning_effort: "none", thinking: { type: "disabled" } }
-      : {}),
-  })
+  const response = await withRetry(() =>
+    client().chat.completions.create({
+      model: MODEL,
+      messages,
+      temperature: 0.3,
+      tools: [TRANSLATION_TOOL],
+      // Z.ai only supports "auto", but with exactly one tool defined and the
+      // system prompt instructing the model to call it, GLM reliably invokes it.
+      tool_choice: "auto",
+      // Z.ai-specific: disable GLM-5.2 reasoning/thinking tokens for speed.
+      ...({ thinking: { type: "disabled" } } as object),
+    }),
+  )
 
-  const raw = response.choices[0]?.message?.content ?? ""
+  const message = response.choices[0]?.message
+
+  // Primary path: parse the tool call arguments (schema-enforced).
+  // Narrow to the function-tool variant — the union also has a "custom" variant.
+  const toolCall = message?.tool_calls?.[0]
+  if (toolCall && toolCall.type === "function" && "function" in toolCall) {
+    const parsed = parseToolArguments(toolCall.function.arguments)
+    if (parsed) {
+      const { translation, ...debug } = parsed
+      return { translation: translation.trim(), debug }
+    }
+  }
+
+  // Fallback: if the model emitted plain content instead of a tool call (rare,
+  // but happens), salvage a translation from the text using the lenient parser.
+  const raw = message?.content ?? ""
   const parsed = parseTranslation(raw)
-  if (!parsed) return { translation: "", debug: null }
+  if (parsed) {
+    const { translation, ...debug } = parsed
+    return {
+      translation: translation.trim(),
+      debug: hasDebugFields(debug) ? debug : null,
+    }
+  }
 
-  const { translation, ...debug } = parsed
-  return { translation: translation.trim(), debug }
+  return { translation: "", debug: null }
+}
+
+/** Type guard: only report debug if at least one field is populated. */
+function hasDebugFields(d: Partial<TranslationDebugParsed>): d is TranslationDebugParsed {
+  return Boolean(d.speaker || d.register || d.honorificsUsed || d.referents)
+}
+
+/**
+ * Parse the tool call's function arguments (a JSON string) against the Zod
+ * schema. This is the schema-enforced path — all required fields should be
+ * present. We still validate defensively in case the model returns malformed JSON.
+ */
+function parseToolArguments(argsJson: string) {
+  try {
+    const obj = JSON.parse(argsJson)
+    const result = TranslationResult.safeParse(obj)
+    return result.success ? result.data : null
+  } catch {
+    return null
+  }
 }
 
 /**
