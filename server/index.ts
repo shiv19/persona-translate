@@ -100,19 +100,39 @@ async function serveStatic(res: http.ServerResponse, urlPath: string) {
   const safe = normalize(decodeURIComponent(urlPath)).replace(/^(\.\.[/\\])+/, "")
   let filePath = join(DIST_DIR, safe)
 
+  // Cache headers keyed off the file path:
+  //  - index.html (and the SPA fallback) → no-cache. The browser always
+  //    revalidates so a new deploy is picked up on next open. Without this,
+  //    an installed PWA serves a stale index.html that points at the previous
+  //    build's hashed assets — the "I updated but nothing changed" bug.
+  //  - /assets/* (Vite content-hashed JS/CSS) → 1 year, immutable. The
+  //    filename changes every build, so caching forever is safe and fast.
+  //  - everything else (icons, manifest) → revalidate after 1 hour.
+  function cacheHeadersFor(p: string): Record<string, string> {
+    if (p.endsWith(".html")) return { "Cache-Control": "no-cache" }
+    if (p.includes(`/assets/`)) return { "Cache-Control": "public, max-age=31536000, immutable" }
+    return { "Cache-Control": "public, max-age=3600" }
+  }
+
   try {
     const s = await stat(filePath)
     if (s.isDirectory()) {
       filePath = join(filePath, "index.html")
     }
     const data = await readFile(filePath)
-    res.writeHead(200, { "Content-Type": MIME[extname(filePath).toLowerCase()] || "application/octet-stream" })
+    res.writeHead(200, {
+      "Content-Type": MIME[extname(filePath).toLowerCase()] || "application/octet-stream",
+      ...cacheHeadersFor(filePath),
+    })
     res.end(data)
   } catch {
     // SPA fallback: any unknown path serves index.html (so client-side routing works)
     try {
       const index = await readFile(join(DIST_DIR, "index.html"))
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        ...cacheHeadersFor("index.html"),
+      })
       res.end(index)
     } catch {
       send(res, 404, { error: "Not found" })
