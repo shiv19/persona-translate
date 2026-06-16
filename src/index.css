@@ -19,6 +19,7 @@
   --radius-sm: 10px;
   --font: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
   --sidebar-width: 300px;
   --content-max: 760px;
   --breakpoint: 768px;
@@ -191,12 +192,31 @@ body {
 }
 
 /* ── Home Screen ── */
+/* OneUI-inspired: title sits up top (display-only, nothing to tap), persona
+   cards center in the thumb-reachable lower region, and "New Persona" is a
+   bottom-right FAB. */
+
+.home-top {
+  flex: 0 0 auto;
+  padding-top: calc(var(--space-6) + var(--safe-top));
+}
 
 .home-header {
-  padding: var(--space-6) var(--space-5) var(--space-4);
+  padding: 0 var(--space-5) var(--space-4);
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.home-bottom {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+  padding: var(--space-4) var(--space-4) calc(var(--space-8) + var(--safe-bottom));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .app-title {
@@ -241,22 +261,9 @@ body {
 }
 
 .persona-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 var(--space-4) var(--space-8);
-  -webkit-overflow-scrolling: touch;
-}
-
-.persona-add-btn {
-  width: 100%;
-  margin-bottom: var(--space-4);
-  background: var(--accent-glow);
-  color: var(--accent);
-  border: 1px dashed var(--accent);
-}
-
-.persona-add-btn:hover {
-  background: rgba(108, 99, 255, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .persona-cards {
@@ -269,6 +276,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 64px; /* comfortable thumb tap target */
   background: var(--bg-card);
   border-radius: var(--radius);
   padding: var(--space-3) var(--space-4);
@@ -339,6 +347,36 @@ body {
   gap: 2px;
   flex-shrink: 0;
   margin-left: var(--space-2);
+}
+
+/* Floating action button — primary "New Persona" affordance on mobile. Sits in
+   the bottom-right thumb arc. Hidden on desktop (sidebar has its own add btn). */
+.fab {
+  position: absolute;
+  right: var(--space-4);
+  bottom: calc(var(--space-6) + var(--safe-bottom));
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: 18px;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(108, 99, 255, 0.4);
+  transition: transform 0.12s ease, background 0.15s ease;
+  z-index: 20;
+}
+
+.fab:hover {
+  background: var(--accent-hover);
+}
+
+.fab:active {
+  transform: scale(0.95);
+  background: var(--accent-hover);
 }
 
 /* ── Sidebar variant (desktop) ── */
@@ -1889,6 +1927,12 @@ body {
 
   .app-main-empty {
     display: flex;
+  }
+
+  /* Desktop: the sidebar has its own "New Persona" button, so the mobile FAB
+     never appears (its container, .home-mobile-only, is hidden above). */
+  .fab {
+    display: none;
   }
 
   /* Lift the 480px cap inside the main pane and center the content for readability */
