@@ -1,5 +1,5 @@
 import type { Persona, Message, TranslationDebug, Suggestion } from "./types"
-import { translateViaApi, suggestViaApi } from "./api"
+import { translateViaApi, suggestViaApi, askViaApi } from "./api"
 
 // Re-export so existing imports (`import { translate, TranslationDebug } from "../ai"`)
 // keep working. The canonical definition lives in ./types.
@@ -50,4 +50,20 @@ export async function suggest(
 ): Promise<Suggestion[]> {
   const { suggestions } = await suggestViaApi(persona, situation, avoid, count, direction, history)
   return suggestions
+}
+
+/**
+ * Ask a language question and get a markdown explanation. Sees the full
+ * conversation history (translations + notes, last 20) so follow-ups chain.
+ * `quote` optionally anchors the question to a specific translation (set when
+ * the user enters Ask mode via the quote icon on a bubble).
+ */
+export async function ask(
+  persona: Persona,
+  question: string,
+  history: Message[] = [],
+  quote?: { original: string; translation: string },
+): Promise<string> {
+  const { answer } = await askViaApi(persona, question, history, quote)
+  return answer
 }

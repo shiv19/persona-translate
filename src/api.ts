@@ -55,6 +55,30 @@ export async function suggestViaApi(
   return (await res.json()) as { suggestions: Suggestion[] }
 }
 
+export async function askViaApi(
+  persona: Persona,
+  question: string,
+  history: Message[] = [],
+  quote?: { original: string; translation: string },
+): Promise<{ answer: string }> {
+  const res = await fetch(`${API_BASE}/api/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ persona, question, history, quote }),
+  })
+
+  if (!res.ok) {
+    let message = `Answer failed (${res.status})`
+    try {
+      const data = await res.json()
+      if (data?.error) message = data.error
+    } catch {}
+    throw new Error(message)
+  }
+
+  return (await res.json()) as { answer: string }
+}
+
 // ---------------------------------------------------------------------------
 // Audio recording + transcription helpers.
 //

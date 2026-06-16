@@ -4,7 +4,7 @@ import { existsSync } from "node:fs"
 import { extname, join, normalize, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Persona, Message } from "./zai.js"
-import { serverTranslate, serverTranscribe, serverSuggest } from "./zai.js"
+import { serverTranslate, serverTranscribe, serverSuggest, serverAsk } from "./zai.js"
 
 // Load .env from the project root if present. Works under both tsx (dev) and
 // node (prod) — no --env-file flag needed. Safe to skip if the file is absent
@@ -158,6 +158,13 @@ interface SuggestRequest {
   history?: Message[]
 }
 
+interface AskRequest {
+  persona: Persona
+  question: string
+  history?: Message[]
+  quote?: { original: string; translation: string }
+}
+
 async function handleTranslate(req: http.IncomingMessage, res: http.ServerResponse) {
   if (!process.env.ZAI_API_KEY) {
     send(res, 500, { error: "Server missing ZAI_API_KEY" })
@@ -213,6 +220,35 @@ async function handleSuggest(req: http.IncomingMessage, res: http.ServerResponse
   } catch (err) {
     console.error("[suggest] error:", err)
     send(res, 502, { error: err instanceof Error ? err.message : "Suggestion failed" })
+  }
+}
+
+async function handleAsk(req: http.IncomingMessage, res: http.ServerResponse) {
+  if (!process.env.ZAI_API_KEY) {
+    send(res, 500, { error: "Server missing ZAI_API_KEY" })
+    return
+  }
+
+  let body: AskRequest
+  try {
+    body = await readJsonBody<AskRequest>(req)
+  } catch {
+    send(res, 400, { error: "Invalid JSON body" })
+    return
+  }
+
+  const { persona, question, history = [], quote } = body
+  if (!persona || typeof question !== "string" || !question.trim()) {
+    send(res, 400, { error: "Missing persona or question" })
+    return
+  }
+
+  try {
+    const result = await serverAsk(persona, question, history, quote)
+    send(res, 200, result)
+  } catch (err) {
+    console.error("[ask] error:", err)
+    send(res, 502, { error: err instanceof Error ? err.message : "Answer failed" })
   }
 }
 
@@ -277,6 +313,11 @@ const server = http.createServer(async (req, res) => {
 
   if (path === "/api/suggest" && method === "POST") {
     await handleSuggest(req, res)
+    return
+  }
+
+  if (path === "/api/ask" && method === "POST") {
+    await handleAsk(req, res)
     return
   }
 

@@ -56,6 +56,9 @@ export interface Message {
   direction: "to-target" | "from-target"
   createdAt: number
   debug?: TranslationDebug | null
+  conversationId?: string
+  kind?: "translation" | "note"
+  quote?: { original: string; translation: string }
 }
 
 export interface TranslationDebug {
@@ -211,21 +214,51 @@ IMPORTANT RULES:
 6. You MUST return your result by calling the record_translation tool. Fill every field: decide speaker, address term, self-reference, register, and referents FIRST (committing to the correct kinship terms before translating), then produce the translation. The "translation" field contains only the translated text.`
 }
 
-function buildHistoryMessages(persona: Persona, history: Message[]): OpenAI.Chat.ChatCompletionMessageParam[] {
+/**
+ * Translation context: only translation-kind turns (notes excluded). Used by
+ * serverTranslate and serverSuggest. Filtering notes here is the critical
+ * correctness rule — Q&A must never feed the translator's kinship reasoning,
+ * since it re-derives pronouns from rules, not history.
+ */
+function buildTranslationHistory(persona: Persona, history: Message[]): OpenAI.Chat.ChatCompletionMessageParam[] {
+  return history
+    .filter((msg) => msg.kind !== "note")
+    .flatMap((msg): OpenAI.Chat.ChatCompletionMessageParam[] => {
+      const speakerLabel = msg.direction === "to-target"
+        ? `[You speaking to ${persona.name}]`
+        : `[${persona.name} speaking to you]`
+
+      return [
+        { role: "user", content: `${speakerLabel} ${msg.original}` },
+        { role: "assistant", content: msg.translation },
+      ]
+    })
+}
+
+/**
+ * Ask context: ALL message kinds (translations + notes), with richer labels so
+ * the tutor can tell questions/answers apart from translation turns. Notes
+ * label the user's question and the tutor's prior answer; translations keep
+ * the speaker labels from buildTranslationHistory. Wider window (20 vs 5) so
+ * follow-up questions can reference earlier explanations.
+ */
+function buildAskHistory(persona: Persona, history: Message[]): OpenAI.Chat.ChatCompletionMessageParam[] {
   return history.flatMap((msg): OpenAI.Chat.ChatCompletionMessageParam[] => {
+    if (msg.kind === "note") {
+      const quoteBlock = msg.quote
+        ? `\n(Asked about: "${msg.quote.original}" → "${msg.quote.translation}")`
+        : ""
+      return [
+        { role: "user", content: `[You asked] ${msg.original}${quoteBlock}` },
+        { role: "assistant", content: msg.translation },
+      ]
+    }
     const speakerLabel = msg.direction === "to-target"
       ? `[You speaking to ${persona.name}]`
       : `[${persona.name} speaking to you]`
-
     return [
-      {
-        role: "user",
-        content: `${speakerLabel} ${msg.original}`,
-      },
-      {
-        role: "assistant",
-        content: msg.translation,
-      },
+      { role: "user", content: `${speakerLabel} ${msg.original}` },
+      { role: "assistant", content: msg.translation },
     ]
   })
 }
@@ -244,7 +277,7 @@ export async function serverTranslate(
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt(persona, direction) },
-    ...buildHistoryMessages(persona, recentHistory),
+    ...buildTranslationHistory(persona, recentHistory),
     { role: "user", content: `${speakerLabel} ${input}` },
   ]
 
@@ -505,10 +538,9 @@ export async function serverSuggest(
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSuggestPrompt(persona, situation, avoid, n, direction) },
-    // Direction-labeled prior turns. buildHistoryMessages tags each with
-    // [You speaking to X] / [X speaking to you], so the model can read the
-    // correct honorifics regardless of the suggest batch's own direction.
-    ...buildHistoryMessages(persona, recentHistory),
+    // Direction-labeled prior turns (notes excluded — suggest, like translate,
+    // re-derives kinship from rules, not Q&A history).
+    ...buildTranslationHistory(persona, recentHistory),
     { role: "user", content: situation },
   ]
 
@@ -587,6 +619,78 @@ function parseSuggestions(text: string): SuggestionItemParsed[] | null {
   }
 
   return null
+}
+
+// ---------------------------------------------------------------------------
+// ASK — open-ended language Q&A (markdown explanations)
+//
+// Unlike translate (structured tool call) and suggest (array tool call), ask
+// returns RAW markdown content — explanations aren't structured data. The model
+// is instructed to use markdown freely (tables for paradigms, lists, inline
+// code for target-language words). Persona context is included so answers are
+// relationship-specific (the moat), and the full conversation history (notes
+// included) so follow-ups can reference prior explanations.
+// ---------------------------------------------------------------------------
+
+const ASK_HISTORY_WINDOW = 20
+
+function buildAskPrompt(persona: Persona): string {
+  return `You are a patient, expert language tutor specializing in ${persona.targetLanguage}, helping a learner who communicates with a specific person.
+
+${buildPersonaContext(persona, true)}
+
+YOUR JOB: Answer the learner's question clearly and concretely. You are explaining how the language works, not translating.
+
+GUIDELINES:
+1. EXPLAIN IN ${persona.sourceLanguage}. Use ${persona.targetLanguage} ONLY for example words/phrases/sentences — wrap each ${persona.targetLanguage} example in inline code (backticks) so it stands out from the explanation prose.
+2. USE MARKDOWN FREELY. Tables are great for pronoun/paradigm comparisons. Bullet/numbered lists for steps or options. **Bold** for key terms. Keep paragraphs short.
+3. BE CONCRETE AND RELATIONSHIP-AWARE. This learner talks to ${persona.name} (see the context above). Ground explanations in that relationship where relevant — e.g. "since you're addressing ${persona.name}, you'd use…" Contrast with other situations (a friend, an elder) when it helps clarify.
+4. REFERENCE THE CONVERSATION. If earlier turns or a quoted translation are provided, anchor your answer in them specifically rather than giving a generic textbook response.
+5. BE ACCURATE. If the answer involves a kinship term, pronoun, or register, derive it from the persona context rules — the same rules the translator uses. Don't contradict what a correct translation would produce.
+6. BE CONCISE BUT COMPLETE. Answer the actual question fully, but don't pad. A focused paragraph or a tight table beats a wall of text. Skip preambles like "Great question!" — just answer.`
+}
+
+export interface AskOutput {
+  answer: string
+}
+
+/**
+ * Answer a language question with a markdown explanation. Sees the full
+ * conversation (translations + notes, last 20) so follow-ups chain. If `quote`
+ * is provided, it's injected as explicit context — the answer should ground in
+ * that specific translation. No tool-call schema; returns raw markdown content.
+ */
+export async function serverAsk(
+  persona: Persona,
+  question: string,
+  history: Message[] = [],
+  quote?: { original: string; translation: string },
+): Promise<AskOutput> {
+  const recentHistory = history.slice(-ASK_HISTORY_WINDOW)
+
+  const userContent = quote
+    ? `The learner is asking about this specific translation:\n\n> ${persona.sourceLanguage}: ${quote.original}\n> ${persona.targetLanguage}: ${quote.translation}\n\nTheir question: ${question}`
+    : question
+
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: "system", content: buildAskPrompt(persona) },
+    ...buildAskHistory(persona, recentHistory),
+    { role: "user", content: userContent },
+  ]
+
+  const response = await withRetry(() =>
+    client().chat.completions.create({
+      model: MODEL,
+      messages,
+      // Between translate's 0.3 (fidelity) and suggest's 0.6 (variety) —
+      // explanations want some thoughtfulness but not invention.
+      temperature: 0.5,
+      ...({ thinking: { type: "disabled" } } as object),
+    }),
+  )
+
+  const answer = response.choices[0]?.message?.content ?? ""
+  return { answer: answer.trim() }
 }
 
 // ---------------------------------------------------------------------------

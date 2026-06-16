@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import type { Persona, Message, Suggestion } from "../types"
 import { uid } from "../types"
-import { translate, suggest, MAX_HISTORY, SUGGEST_BATCH } from "../ai"
+import { translate, suggest, ask, MAX_HISTORY, SUGGEST_BATCH } from "../ai"
 import {
   loadMessages,
   saveMessage,
@@ -13,7 +13,8 @@ import {
   addSeenPhrase,
 } from "../storage"
 import { resolveLangCode } from "../tts"
-import { ArrowLeft, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft, X, Repeat, Star, Sparkles, Plus, History } from "lucide-react"
+import { Markdown } from "./Markdown"
+import { ArrowLeft, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft, X, Repeat, Star, Sparkles, Plus, History, MessageCircleQuestion, Quote } from "lucide-react"
 
 interface Props {
   persona: Persona
@@ -58,6 +59,9 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
   })
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
+  // Which mode is currently loading — drives the loading placeholder shape.
+  // "translate" → "You said" + translation typing; "ask" → "You asked" + answer typing.
+  const [loadingMode, setLoadingMode] = useState<"translate" | "ask">("translate")
   const [error, setError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
@@ -68,6 +72,12 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
   // after one send. `activeBatch` holds the currently-displayed suggestions.
   const [suggestMode, setSuggestMode] = useState(false)
   const [activeBatch, setActiveBatch] = useState<SuggestionBatch | null>(null)
+  // Ask mode: when armed, the textarea becomes a question field and the send
+  // button calls the ask endpoint, producing a markdown note (kind: "note").
+  // `quote` is set when the user enters Ask mode via the quote icon on a bubble
+  // — it anchors the question to that specific translation.
+  const [askMode, setAskMode] = useState(false)
+  const [quote, setQuote] = useState<{ original: string; translation: string } | null>(null)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(() =>
     typeof window !== "undefined" ? window.speechSynthesis.getVoices() : [],
   )
@@ -136,6 +146,11 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
     const text = input.trim()
     if (!text || loading) return
 
+    if (askMode) {
+      await handleAsk(text)
+      return
+    }
+
     if (suggestMode) {
       await handleSuggest(text)
       return
@@ -144,6 +159,7 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
     setInput("")
     setPendingText(text)
     setLoading(true)
+    setLoadingMode("translate")
     setError(null)
 
     try {
@@ -173,6 +189,58 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
       setLoading(false)
       inputRef.current?.focus()
     }
+  }
+
+  // Ask mode flow. The typed text is a QUESTION about the language or a quoted
+  // translation. The answer comes back as markdown and is saved as a note
+  // (kind: "note") interleaved in the conversation. Notes are excluded from
+  // translate context but included in ask context, so follow-ups chain.
+  async function handleAsk(question: string) {
+    const currentQuote = quote
+    setInput("")
+    setAskMode(false)
+    setQuote(null)
+    setPendingText(question)
+    setLoading(true)
+    setLoadingMode("ask")
+    setError(null)
+
+    try {
+      const answer = await ask(persona, question, messages, currentQuote ?? undefined)
+      const msg: Message = {
+        id: uid(),
+        personaId: persona.id,
+        original: question,
+        translation: answer,
+        direction: "to-target", // unused for notes; required by the type
+        createdAt: Date.now(),
+        conversationId,
+        kind: "note",
+        quote: currentQuote ?? undefined,
+      }
+      saveMessage(msg)
+      setMessages((prev) => [...prev, msg])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Answer failed"
+      setError(message)
+      setInput(question)
+      // Restore the quote so the user can retry without re-quoting.
+      if (currentQuote) setQuote(currentQuote)
+      setAskMode(true)
+    } finally {
+      setPendingText(null)
+      setLoading(false)
+      inputRef.current?.focus()
+    }
+  }
+
+  // Enter Ask mode anchored to a specific translation (the quote icon on a
+  // bubble). Sets the quote row + arms ask mode + focuses the input.
+  function handleQuote(msg: Message) {
+    setQuote({ original: msg.original, translation: msg.translation })
+    setSuggestMode(false)
+    setAskMode(true)
+    inputRef.current?.focus()
   }
 
   // Situational suggestion flow. The typed text is a SITUATION ("going
@@ -427,112 +495,180 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
           </div>
         )}
 
-        {messages.map((msg) => (
-          <div key={msg.id} className="chat-bubble-wrapper">
-            <div className="chat-bubble chat-bubble-original">
-              <div className="chat-bubble-label">
-                {msg.direction === "to-target" ? "You said" : `${persona.name} said`}
-                <span className="bubble-actions">
-                  <button
-                    className={`btn btn-ghost btn-sm btn-speak ${playingId === `orig-${msg.id}` ? "speaking" : ""}`}
-                    onClick={() => handleSpeak(msg.original, `orig-${msg.id}`, msg.direction === "to-target" ? "from-target" : "to-target")}
-                    title={playingId === `orig-${msg.id}` ? "Stop" : "Play aloud"}
-                    aria-label={playingId === `orig-${msg.id}` ? "Stop playback" : "Play original aloud"}
-                    aria-pressed={playingId === `orig-${msg.id}`}
-                  >
-                    {playingId === `orig-${msg.id}` ? <VolumeX size={16} /> : <Volume2 size={16} />}
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => handleCopy(msg.original, `orig-${msg.id}`)}
-                    title="Copy"
-                    aria-label={copiedId === `orig-${msg.id}` ? "Copied" : "Copy original"}
-                  >
-                    {copiedId === `orig-${msg.id}` ? <Check size={16} /> : <Copy size={16} />}
-                  </button>
-                </span>
+        {messages.map((msg) =>
+          msg.kind === "note" ? (
+            // Ask-mode note: a single markdown card, distinct from translation
+            // bubbles. Shows the quoted translation (if any), the question, and
+            // the markdown answer. No TTS (markdown isn't speakable), no
+            // favorite star (notes aren't favoritable per the design call).
+            <div key={msg.id} className="note-bubble-wrapper">
+              <div className="note-bubble">
+                <div className="note-bubble-label">
+                  <MessageCircleQuestion size={13} /> You asked
+                  <span className="bubble-actions">
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => handleCopy(msg.translation, msg.id)}
+                      title="Copy answer"
+                      aria-label={copiedId === msg.id ? "Copied" : "Copy answer"}
+                    >
+                      {copiedId === msg.id ? <Check size={14} /> : <Copy size={14} />}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm btn-danger"
+                      onClick={() => handleDeleteTurn(msg.id)}
+                      title="Delete this note"
+                      aria-label="Delete this note"
+                    >
+                      <X size={14} />
+                    </button>
+                  </span>
+                </div>
+                {msg.quote && (
+                  <div className="note-bubble-quote">
+                    <Quote size={12} />
+                    <span className="note-bubble-quote-text">{msg.quote.original}</span>
+                    <span className="note-bubble-quote-translation">{msg.quote.translation}</span>
+                  </div>
+                )}
+                <div className="note-bubble-question">{msg.original}</div>
+                <Markdown>{msg.translation}</Markdown>
               </div>
-              <div className="chat-bubble-text">{msg.original}</div>
             </div>
-            <div className="chat-bubble chat-bubble-translation">
-              <div className="chat-bubble-label">
-                Translation
-                <span className="bubble-actions">
-                  <button
-                    className={`btn btn-ghost btn-sm btn-speak ${playingId === msg.id ? "speaking" : ""}`}
-                    onClick={() => handleSpeak(msg.translation, msg.id, msg.direction)}
-                    title={playingId === msg.id ? "Stop" : "Play aloud"}
-                    aria-label={playingId === msg.id ? "Stop playback" : "Play translation aloud"}
-                    aria-pressed={playingId === msg.id}
-                  >
-                    {playingId === msg.id ? <VolumeX size={16} /> : <Volume2 size={16} />}
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => handleCopy(msg.translation, msg.id)}
-                    title="Copy"
-                    aria-label={copiedId === msg.id ? "Copied" : "Copy translation"}
-                  >
-                    {copiedId === msg.id ? <Check size={16} /> : <Copy size={16} />}
-                  </button>
-                  <button
-                    className={`btn btn-ghost btn-sm btn-favorite ${favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "favorited" : ""}`}
-                    onClick={() => handleToggleFavorite(msg)}
-                    title={favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "Remove from favorites" : "Add to favorites"}
-                    aria-label={favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "Remove from favorites" : "Add to favorites"}
-                    aria-pressed={favoritedKeys.has(`${msg.original}::${msg.translation}`)}
-                  >
-                    <Star size={16} fill={favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "currentColor" : "none"} />
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-sm btn-danger"
-                    onClick={() => handleDeleteTurn(msg.id)}
-                    title="Delete this turn"
-                    aria-label="Delete this turn"
-                  >
-                    <X size={16} />
-                  </button>
-                </span>
+          ) : (
+            <div key={msg.id} className="chat-bubble-wrapper">
+              <div className="chat-bubble chat-bubble-original">
+                <div className="chat-bubble-label">
+                  {msg.direction === "to-target" ? "You said" : `${persona.name} said`}
+                  <span className="bubble-actions">
+                    <button
+                      className={`btn btn-ghost btn-sm btn-speak ${playingId === `orig-${msg.id}` ? "speaking" : ""}`}
+                      onClick={() => handleSpeak(msg.original, `orig-${msg.id}`, msg.direction === "to-target" ? "from-target" : "to-target")}
+                      title={playingId === `orig-${msg.id}` ? "Stop" : "Play aloud"}
+                      aria-label={playingId === `orig-${msg.id}` ? "Stop playback" : "Play original aloud"}
+                      aria-pressed={playingId === `orig-${msg.id}`}
+                    >
+                      {playingId === `orig-${msg.id}` ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => handleCopy(msg.original, `orig-${msg.id}`)}
+                      title="Copy"
+                      aria-label={copiedId === `orig-${msg.id}` ? "Copied" : "Copy original"}
+                    >
+                      {copiedId === `orig-${msg.id}` ? <Check size={16} /> : <Copy size={16} />}
+                    </button>
+                  </span>
+                </div>
+                <div className="chat-bubble-text">{msg.original}</div>
               </div>
-              <div className="chat-bubble-text">{msg.translation}</div>
-              {msg.debug && (
-                <details className="debug-details">
-                  <summary>Grammar</summary>
-                  <dl className="debug-grid">
-                    <dt>Speaker</dt>
-                    <dd>{msg.debug.speaker}</dd>
-                    <dt>Register</dt>
-                    <dd>{msg.debug.register}</dd>
-                    <dt>Honorifics</dt>
-                    <dd>{msg.debug.honorificsUsed}</dd>
-                    <dt>Referents</dt>
-                    <dd>{msg.debug.referents}</dd>
-                  </dl>
-                </details>
-              )}
+              <div className="chat-bubble chat-bubble-translation">
+                <div className="chat-bubble-label">
+                  Translation
+                  <span className="bubble-actions">
+                    <button
+                      className={`btn btn-ghost btn-sm btn-speak ${playingId === msg.id ? "speaking" : ""}`}
+                      onClick={() => handleSpeak(msg.translation, msg.id, msg.direction)}
+                      title={playingId === msg.id ? "Stop" : "Play aloud"}
+                      aria-label={playingId === msg.id ? "Stop playback" : "Play translation aloud"}
+                      aria-pressed={playingId === msg.id}
+                    >
+                      {playingId === msg.id ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => handleCopy(msg.translation, msg.id)}
+                      title="Copy"
+                      aria-label={copiedId === msg.id ? "Copied" : "Copy translation"}
+                    >
+                      {copiedId === msg.id ? <Check size={16} /> : <Copy size={16} />}
+                    </button>
+                    {/* Quote/Ask — enter Ask mode anchored to this translation */}
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => handleQuote(msg)}
+                      title="Ask about this translation"
+                      aria-label="Ask about this translation"
+                    >
+                      <Quote size={16} />
+                    </button>
+                    <button
+                      className={`btn btn-ghost btn-sm btn-favorite ${favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "favorited" : ""}`}
+                      onClick={() => handleToggleFavorite(msg)}
+                      title={favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "Remove from favorites" : "Add to favorites"}
+                      aria-label={favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "Remove from favorites" : "Add to favorites"}
+                      aria-pressed={favoritedKeys.has(`${msg.original}::${msg.translation}`)}
+                    >
+                      <Star size={16} fill={favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "currentColor" : "none"} />
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm btn-danger"
+                      onClick={() => handleDeleteTurn(msg.id)}
+                      title="Delete this turn"
+                      aria-label="Delete this turn"
+                    >
+                      <X size={16} />
+                    </button>
+                  </span>
+                </div>
+                <div className="chat-bubble-text">{msg.translation}</div>
+                {msg.debug && (
+                  <details className="debug-details">
+                    <summary>Grammar</summary>
+                    <dl className="debug-grid">
+                      <dt>Speaker</dt>
+                      <dd>{msg.debug.speaker}</dd>
+                      <dt>Register</dt>
+                      <dd>{msg.debug.register}</dd>
+                      <dt>Honorifics</dt>
+                      <dd>{msg.debug.honorificsUsed}</dd>
+                      <dt>Referents</dt>
+                      <dd>{msg.debug.referents}</dd>
+                    </dl>
+                  </details>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ),
+        )}
 
         {loading && !activeBatch && (
-          <div className="chat-bubble-wrapper">
-            <div className="chat-bubble chat-bubble-original">
-              <div className="chat-bubble-label">
-                {direction === "to-target" ? "You said" : `${persona.name} said`}
+          loadingMode === "ask" ? (
+            <div className="note-bubble-wrapper">
+              <div className="note-bubble">
+                <div className="note-bubble-label">
+                  <MessageCircleQuestion size={13} /> You asked
+                </div>
+                <div className="note-bubble-question">{pendingText ?? "..."}</div>
+                <div className="note-bubble-loading">
+                  <span className="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </span>
+                </div>
               </div>
-              <div className="chat-bubble-text">{pendingText ?? "..."}</div>
             </div>
-            <div className="chat-bubble chat-bubble-translation">
-              <div className="chat-bubble-label">Translation</div>
-              <div className="chat-bubble-text">
-                <span className="typing-indicator">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </span>
+          ) : (
+            <div className="chat-bubble-wrapper">
+              <div className="chat-bubble chat-bubble-original">
+                <div className="chat-bubble-label">
+                  {direction === "to-target" ? "You said" : `${persona.name} said`}
+                </div>
+                <div className="chat-bubble-text">{pendingText ?? "..."}</div>
+              </div>
+              <div className="chat-bubble chat-bubble-translation">
+                <div className="chat-bubble-label">Translation</div>
+                <div className="chat-bubble-text">
+                  <span className="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
+          )
         )}
 
         {/* Situational suggestion batch. Distinct from chat turns but bridged to
@@ -685,18 +821,39 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
       </div>
 
       <div className="chat-input-area">
+        {/* Quote row — shown when Ask mode was entered via the quote icon on a
+            bubble. Displays the anchored translation; dismiss X clears it. */}
+        {quote && (
+          <div className="chat-quote-row">
+            <Quote size={14} className="chat-quote-icon" />
+            <div className="chat-quote-content">
+              <div className="chat-quote-original">{quote.original}</div>
+              <div className="chat-quote-translation">{quote.translation}</div>
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setQuote(null)}
+              aria-label="Remove quote"
+              title="Remove quote"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
         <div className="chat-input-row">
           <textarea
             ref={inputRef}
-            className={`chat-input ${suggestMode ? "chat-input-suggest" : ""}`}
+            className={`chat-input ${suggestMode ? "chat-input-suggest" : ""} ${askMode ? "chat-input-ask" : ""}`}
             placeholder={
-              suggestMode
-                ? direction === "to-target"
-                  ? `Describe a situation to get phrases YOU would say (e.g. "going shopping for clothes")…`
-                  : `Describe a situation to get phrases ${persona.name} would say (e.g. "asking about the baby")…`
-                : direction === "to-target"
-                  ? `Type in ${persona.sourceLanguage}...`
-                  : `Type in ${persona.targetLanguage}...`
+              askMode
+                ? `Ask a question about the language or this translation…`
+                : suggestMode
+                  ? direction === "to-target"
+                    ? `Describe a situation to get phrases YOU would say (e.g. "going shopping for clothes")…`
+                    : `Describe a situation to get phrases ${persona.name} would say (e.g. "asking about the baby")…`
+                  : direction === "to-target"
+                    ? `Type in ${persona.sourceLanguage}...`
+                    : `Type in ${persona.targetLanguage}...`
             }
             value={input}
             onChange={(e) => {
@@ -709,23 +866,25 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
             disabled={loading}
           />
           <button
-            className={`btn btn-primary chat-send-btn ${suggestMode ? "chat-send-btn-suggest" : ""}`}
+            className={`btn btn-primary chat-send-btn ${suggestMode ? "chat-send-btn-suggest" : ""} ${askMode ? "chat-send-btn-ask" : ""}`}
             onClick={handleSend}
             disabled={loading || !input.trim()}
-            aria-label={suggestMode ? "Suggest phrases for this situation" : "Send message"}
+            aria-label={askMode ? "Ask this question" : suggestMode ? "Suggest phrases for this situation" : "Send message"}
           >
-            {loading ? "..." : suggestMode ? <Sparkles size={20} /> : <SendHorizontal size={20} />}
+            {loading ? "..." : askMode ? <MessageCircleQuestion size={20} /> : suggestMode ? <Sparkles size={20} /> : <SendHorizontal size={20} />}
           </button>
         </div>
         <div className="chat-toggle-row">
           <button
             className={`btn btn-ghost chat-speaker-toggle ${suggestMode ? "toggled" : ""}`}
             onClick={() => {
-              // Preserve whatever the user typed — the draft is equally valid
-              // as a situation or a translation, and clearing it on toggle is a
-              // footgun (one mis-tap loses the text). The toggled state itself
-              // communicates that suggest mode is active.
+              // Preserve typed text across mode toggles (footgun guard).
               setSuggestMode((v) => !v)
+              // Enabling suggest disables ask (mutually exclusive modes).
+              if (!suggestMode) {
+                setAskMode(false)
+                setQuote(null)
+              }
               inputRef.current?.focus()
             }}
             title={suggestMode ? "Suggest mode on — tap to return to translate" : "Suggest phrases for a situation"}
@@ -733,32 +892,55 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
             aria-label={suggestMode ? "Suggest mode on. Tap to return to translate." : "Suggest phrases for a situation."}
           >
             <Sparkles size={14} />
-            {/* The label is the action name in both states; the toggled styling
-                conveys that it's active, so we don't need a separate "mode on"
-                string (which reads as a status, not a button). */}
             <span className="speaker-label">Suggest a phrase</span>
           </button>
           <button
-            className={`btn btn-ghost chat-speaker-toggle ${direction === "from-target" ? "toggled" : ""}`}
-            onClick={() => setDirection(direction === "to-target" ? "from-target" : "to-target")}
+            className={`btn btn-ghost chat-speaker-toggle ${askMode ? "toggled" : ""}`}
+            onClick={() => {
+              setAskMode((v) => !v)
+              // Enabling ask disables suggest (mutually exclusive). Quote is
+              // only set via the bubble icon, not this toggle, so leave it.
+              if (!askMode) {
+                setSuggestMode(false)
+              } else {
+                // Turning ask OFF clears any pending quote.
+                setQuote(null)
+              }
+              inputRef.current?.focus()
+            }}
+            title={askMode ? "Ask mode on — tap to return to translate" : "Ask a question about the language"}
+            aria-pressed={askMode}
+            aria-label={askMode ? "Ask mode on. Tap to return to translate." : "Ask a question about the language."}
+          >
+            <MessageCircleQuestion size={14} />
+            <span className="speaker-label">Ask a question</span>
+          </button>
+          <button
+            className={`btn btn-ghost chat-speaker-toggle ${direction === "from-target" ? "toggled" : ""} ${askMode ? "is-disabled" : ""}`}
+            onClick={() => !askMode && setDirection(direction === "to-target" ? "from-target" : "to-target")}
             title={
-              direction === "to-target"
-                ? suggestMode
-                  ? "Phrases you would say. Tap to switch to phrases they would say."
-                  : "Tap to switch to their voice"
-                : suggestMode
-                  ? `Phrases ${persona.name} would say. Tap to switch to phrases you would say.`
-                  : "Tap to switch to your voice"
+              askMode
+                ? "Direction is fixed in ask mode (notes are about the language, not a speaker turn)"
+                : direction === "to-target"
+                  ? suggestMode
+                    ? "Phrases you would say. Tap to switch to phrases they would say."
+                    : "Tap to switch to their voice"
+                  : suggestMode
+                    ? `Phrases ${persona.name} would say. Tap to switch to phrases you would say.`
+                    : "Tap to switch to your voice"
             }
             aria-pressed={direction === "from-target"}
+            aria-disabled={askMode}
             aria-label={
-              direction === "to-target"
-                ? suggestMode
-                  ? `Phrases you would say to ${persona.name}. Tap for phrases they would say.`
-                  : `You speaking to ${persona.name}. Tap to switch to their voice.`
-                : suggestMode
-                  ? `Phrases ${persona.name} would say to you. Tap for phrases you would say.`
-                  : `${persona.name} speaking to you. Tap to switch to your voice.`
+              askMode
+                ? "Direction locked in ask mode"
+                : direction === "to-target"
+                  ? suggestMode
+                    ? `Phrases you would say to ${persona.name}. Tap for phrases they would say.`
+                    : `You speaking to ${persona.name}. Tap to switch to their voice.`
+                  : suggestMode
+                    ? `Phrases ${persona.name} would say to you. Tap for phrases you would say.`
+                    : `${persona.name} speaking to you. Tap to switch to your voice.`
             }
           >
             <Repeat size={14} />

@@ -31,6 +31,16 @@ export interface Message {
    *  (created before conversations existed) remain valid — they're treated as
    *  belonging to the persona's active conversation at read time. */
   conversationId?: string
+  /** What kind of message this is.
+   *  - "translation" (default): a translate turn. Feeds translate/suggest context.
+   *  - "note": an Ask-mode Q&A. Excluded from translate context (so Q&A never
+   *    corrupts pronoun reasoning) but included in ask's wider context window
+   *    (so follow-ups can reference prior answers). */
+  kind?: "translation" | "note"
+  /** For notes only: the translation the user asked about, if they entered Ask
+   *  mode via the quote icon on a bubble. Lets the answer be re-grounded in the
+   *  specific utterance later. */
+  quote?: { original: string; translation: string }
 }
 
 // Canonical definition of the translation debug shape. `ai.ts` re-exports this
