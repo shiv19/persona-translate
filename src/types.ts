@@ -38,6 +38,17 @@ export interface TranslationDebug {
   referents?: string
 }
 
+export interface Favorite {
+  id: string
+  personaId: string
+  original: string
+  translation: string
+  direction: "to-target" | "from-target"
+  notes?: string
+  tags?: string[]
+  createdAt: number
+}
+
 export function uid(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
     return crypto.randomUUID()
@@ -50,3 +61,4 @@ export type Screen =
   | { view: "create-persona" }
   | { view: "edit-persona"; personaId: string }
   | { view: "chat"; personaId: string }
+  | { view: "favorites"; personaId: string }

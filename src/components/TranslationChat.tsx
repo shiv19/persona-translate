@@ -2,54 +2,25 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import type { Persona, Message } from "../types"
 import { uid } from "../types"
 import { translate, MAX_HISTORY } from "../ai"
-import { loadMessages, saveMessage, clearMessages, deleteMessage } from "../storage"
-import { ArrowLeft, Trash2, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft, X, Repeat } from "lucide-react"
-
-const LANG_MAP: Record<string, string> = {
-  vietnamese: "vi-VN",
-  viet: "vi-VN",
-  korean: "ko-KR",
-  japanese: "ja-JP",
-  chinese: "zh-CN",
-  mandarin: "zh-CN",
-  cantonese: "zh-HK",
-  spanish: "es-ES",
-  french: "fr-FR",
-  german: "de-DE",
-  portuguese: "pt-BR",
-  italian: "it-IT",
-  thai: "th-TH",
-  tagalog: "fil-PH",
-  filipino: "fil-PH",
-  hindi: "hi-IN",
-  tamil: "ta-IN",
-  arabic: "ar-SA",
-  russian: "ru-RU",
-  indonesian: "id-ID",
-  malay: "ms-MY",
-  english: "en-US",
-}
-
-// Resolve a free-text language (e.g. "Vietnamese", "Brazilian Portuguese")
-// to a BCP-47 tag the synth will accept. Returns undefined if we can't map it
-// to something the speech engine actually understands, so the caller can fall
-// back to the synth's default instead of feeding it garbage like
-// "brazilian portuguese".
-function resolveLangCode(language: string): string | undefined {
-  const lower = language.toLowerCase().trim()
-  for (const [key, code] of Object.entries(LANG_MAP)) {
-    if (lower.includes(key)) return code
-  }
-  return undefined
-}
+import { loadMessages, saveMessage, clearMessages, deleteMessage, isFavorited, saveFavorite, removeFavoriteByContent } from "../storage"
+import { resolveLangCode } from "../tts"
+import { ArrowLeft, Trash2, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft, X, Repeat, Star } from "lucide-react"
 
 interface Props {
   persona: Persona
   onBack: () => void
+  onFavorites: () => void
 }
 
-export function TranslationChat({ persona, onBack }: Props) {
+export function TranslationChat({ persona, onBack, onFavorites }: Props) {
   const [messages, setMessages] = useState<Message[]>(() => loadMessages(persona.id))
+  const [favoritedKeys, setFavoritedKeys] = useState<Set<string>>(() => {
+    const keys = new Set<string>()
+    messages.forEach((m) => {
+      if (isFavorited(m.original, m.translation)) keys.add(`${m.original}::${m.translation}`)
+    })
+    return keys
+  })
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -172,6 +143,28 @@ export function TranslationChat({ persona, onBack }: Props) {
     setTimeout(() => setCopiedId(null), 1500)
   }
 
+  function handleToggleFavorite(msg: Message) {
+    const key = `${msg.original}::${msg.translation}`
+    if (favoritedKeys.has(key)) {
+      removeFavoriteByContent(msg.original, msg.translation)
+      setFavoritedKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+    } else {
+      saveFavorite({
+        id: uid(),
+        personaId: persona.id,
+        original: msg.original,
+        translation: msg.translation,
+        direction: msg.direction,
+        createdAt: Date.now(),
+      })
+      setFavoritedKeys((prev) => new Set(prev).add(key))
+    }
+  }
+
   function handleClear() {
     clearMessages(persona.id)
     setMessages([])
@@ -196,6 +189,14 @@ export function TranslationChat({ persona, onBack }: Props) {
           </span>
         </div>
         <div className="chat-header-actions">
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={onFavorites}
+            title="View favorites"
+            aria-label="View favorites"
+          >
+            <Star size={16} />
+          </button>
           {messages.length > 0 && (
             <button
               className="btn btn-ghost btn-sm"
@@ -289,6 +290,15 @@ export function TranslationChat({ persona, onBack }: Props) {
                     aria-label={copiedId === msg.id ? "Copied" : "Copy translation"}
                   >
                     {copiedId === msg.id ? <Check size={16} /> : <Copy size={16} />}
+                  </button>
+                  <button
+                    className={`btn btn-ghost btn-sm btn-favorite ${favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "favorited" : ""}`}
+                    onClick={() => handleToggleFavorite(msg)}
+                    title={favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "Remove from favorites" : "Add to favorites"}
+                    aria-label={favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "Remove from favorites" : "Add to favorites"}
+                    aria-pressed={favoritedKeys.has(`${msg.original}::${msg.translation}`)}
+                  >
+                    <Star size={16} fill={favoritedKeys.has(`${msg.original}::${msg.translation}`) ? "currentColor" : "none"} />
                   </button>
                   <button
                     className="btn btn-ghost btn-sm btn-danger"

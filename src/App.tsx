@@ -5,6 +5,7 @@ import { loadPersonas, savePersonas, deletePersona as removePersona } from "./st
 import { PersonaList, PersonaEmptyMain } from "./components/PersonaList"
 import { PersonaForm } from "./components/PersonaForm"
 import { TranslationChat } from "./components/TranslationChat"
+import { FavoritesView } from "./components/FavoritesView"
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>(() => {
@@ -87,13 +88,15 @@ export default function App() {
 
   // Active persona id is used to highlight the sidebar item on desktop.
   const activePersonaId =
-    screen.view === "chat" || screen.view === "edit-persona" ? screen.personaId : undefined
+    screen.view === "chat" || screen.view === "edit-persona" || screen.view === "favorites"
+      ? screen.personaId
+      : undefined
 
   // If we land on a chat/edit screen whose persona no longer exists, redirect
   // home. Done as an effect (not during render) to avoid setState-in-render.
   useEffect(() => {
     if (
-      (screen.view === "chat" || screen.view === "edit-persona") &&
+      (screen.view === "chat" || screen.view === "edit-persona" || screen.view === "favorites") &&
       !getPersona(screen.personaId)
     ) {
       navigate({ view: "home" })
@@ -135,7 +138,25 @@ export default function App() {
     if (screen.view === "chat") {
       const persona = getPersona(screen.personaId)
       if (!persona) return null
-      return <TranslationChat key={persona.id} persona={persona} onBack={goHome} />
+      return (
+        <TranslationChat
+          key={persona.id}
+          persona={persona}
+          onBack={goHome}
+          onFavorites={() => navigate({ view: "favorites", personaId: screen.personaId })}
+        />
+      )
+    }
+
+    if (screen.view === "favorites") {
+      const persona = getPersona(screen.personaId)
+      if (!persona) return null
+      return (
+        <FavoritesView
+          persona={persona}
+          onBack={() => navigate({ view: "chat", personaId: screen.personaId })}
+        />
+      )
     }
 
     return null
