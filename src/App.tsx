@@ -1,11 +1,21 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import type { Screen, Persona } from "./types"
 import { uid } from "./types"
-import { loadPersonas, savePersonas, deletePersona as removePersona } from "./storage"
+import {
+  loadPersonas,
+  savePersonas,
+  deletePersona as removePersona,
+  getOrCreateActiveConversation,
+  getConversation,
+  createConversation,
+  ensureConversationTitle,
+  loadMessages,
+} from "./storage"
 import { PersonaList, PersonaEmptyMain } from "./components/PersonaList"
 import { PersonaForm } from "./components/PersonaForm"
 import { TranslationChat } from "./components/TranslationChat"
 import { FavoritesView } from "./components/FavoritesView"
+import { HistoryDrawer } from "./components/HistoryDrawer"
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>(() => {
@@ -17,6 +27,20 @@ export default function App() {
   })
   const [personas, setPersonas] = useState<Persona[]>(() => loadPersonas())
   const pushing = useRef(false)
+  // Session-only map of which conversation is loaded per persona. Not persisted
+  // — on reload, the chat screen derives the active conversation (most recent)
+  // via getOrCreateActiveConversation. This map just makes "New Chat" and
+  // "select from history" deterministic within a session.
+  const [activeConversations, setActiveConversations] = useState<Record<string, string>>({})
+
+  /** Resolve the active conversation id for a persona, creating one lazily. */
+  const resolveActiveConversation = useCallback((personaId: string): string => {
+    const existing = activeConversations[personaId]
+    if (existing) return existing
+    const conv = getOrCreateActiveConversation(personaId)
+    setActiveConversations((prev) => ({ ...prev, [personaId]: conv.id }))
+    return conv.id
+  }, [activeConversations])
 
   const navigate = useCallback((next: Screen) => {
     pushing.current = true
@@ -86,9 +110,44 @@ export default function App() {
     navigate({ view: "home" })
   }
 
+  /**
+   * "New Chat" — archive the current conversation (only if it has messages),
+   * then start a fresh empty one. Per the user's spec: if the current
+   * conversation is empty, just reuse it rather than creating a junk entry.
+   */
+  function handleNewChat(personaId: string) {
+    const currentId = activeConversations[personaId]
+    if (currentId) {
+      const conv = getConversation(currentId)
+      const msgs = loadMessages(personaId, currentId)
+      if (conv && msgs.length > 0) {
+        // Ensure the archived conversation has a derived title before we move on.
+        ensureConversationTitle(conv)
+        // Create a fresh conversation and make it active.
+        const fresh = createConversation(personaId)
+        setActiveConversations((prev) => ({ ...prev, [personaId]: fresh.id }))
+      }
+      // If empty (or the record vanished), reuse the current one — no junk entry.
+    } else {
+      // No active conversation yet — create the first one.
+      const fresh = createConversation(personaId)
+      setActiveConversations((prev) => ({ ...prev, [personaId]: fresh.id }))
+    }
+    navigate({ view: "chat", personaId })
+  }
+
+  /** Select a conversation from history — load it as active and close the drawer. */
+  function handleSelectConversation(personaId: string, conversationId: string) {
+    setActiveConversations((prev) => ({ ...prev, [personaId]: conversationId }))
+    navigate({ view: "chat", personaId })
+  }
+
   // Active persona id is used to highlight the sidebar item on desktop.
   const activePersonaId =
-    screen.view === "chat" || screen.view === "edit-persona" || screen.view === "favorites"
+    screen.view === "chat" ||
+    screen.view === "edit-persona" ||
+    screen.view === "favorites" ||
+    screen.view === "history"
       ? screen.personaId
       : undefined
 
@@ -96,7 +155,10 @@ export default function App() {
   // home. Done as an effect (not during render) to avoid setState-in-render.
   useEffect(() => {
     if (
-      (screen.view === "chat" || screen.view === "edit-persona" || screen.view === "favorites") &&
+      (screen.view === "chat" ||
+        screen.view === "edit-persona" ||
+        screen.view === "favorites" ||
+        screen.view === "history") &&
       !getPersona(screen.personaId)
     ) {
       navigate({ view: "home" })
@@ -138,12 +200,19 @@ export default function App() {
     if (screen.view === "chat") {
       const persona = getPersona(screen.personaId)
       if (!persona) return null
+      const conversationId = resolveActiveConversation(screen.personaId)
       return (
         <TranslationChat
-          key={persona.id}
+          // key includes conversationId so the component remounts when the
+          // active conversation changes (New Chat / select from history),
+          // re-initializing its message state from the new conversation.
+          key={`${persona.id}-${conversationId}`}
           persona={persona}
+          conversationId={conversationId}
           onBack={goHome}
           onFavorites={() => navigate({ view: "favorites", personaId: screen.personaId })}
+          onHistory={() => navigate({ view: "history", personaId: screen.personaId })}
+          onNewChat={() => handleNewChat(screen.personaId)}
         />
       )
     }
@@ -220,6 +289,21 @@ export default function App() {
           renderMain()
         )}
       </main>
+
+      {/* History drawer — slides over the main pane. Rendered as an overlay
+          sibling so it floats above the chat (and the sidebar) rather than
+          replacing the chat screen. Browser-back closes it via the popstate
+          handler since it's a Screen variant. */}
+      {screen.view === "history" && screen.personaId && (
+        <HistoryDrawer
+          persona={getPersona(screen.personaId)!}
+          activeConversationId={activeConversations[screen.personaId]}
+          onSelect={(conversationId) =>
+            handleSelectConversation(screen.personaId, conversationId)
+          }
+          onClose={() => navigate({ view: "chat", personaId: screen.personaId })}
+        />
+      )}
     </div>
   )
 }

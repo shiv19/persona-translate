@@ -27,6 +27,10 @@ export interface Message {
   direction: "to-target" | "from-target"
   createdAt: number
   debug?: TranslationDebug | null
+  /** Which conversation this message belongs to. Optional so legacy messages
+   *  (created before conversations existed) remain valid — they're treated as
+   *  belonging to the persona's active conversation at read time. */
+  conversationId?: string
 }
 
 // Canonical definition of the translation debug shape. `ai.ts` re-exports this
@@ -62,6 +66,19 @@ export interface Suggestion {
   note?: string
 }
 
+// A saved conversation thread scoped to a persona. Messages carry a
+// conversationId linking them here. Title defaults to the first message
+// verbatim (truncated); user-renameable. Pinned conversations sort first.
+// updatedAt is bumped on each message save and drives recency ordering.
+export interface Conversation {
+  id: string
+  personaId: string
+  title: string
+  pinned: boolean
+  createdAt: number
+  updatedAt: number
+}
+
 export function uid(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
     return crypto.randomUUID()
@@ -75,3 +92,4 @@ export type Screen =
   | { view: "edit-persona"; personaId: string }
   | { view: "chat"; personaId: string }
   | { view: "favorites"; personaId: string }
+  | { view: "history"; personaId: string }

@@ -5,7 +5,6 @@ import { translate, suggest, MAX_HISTORY, SUGGEST_BATCH } from "../ai"
 import {
   loadMessages,
   saveMessage,
-  clearMessages,
   deleteMessage,
   isFavorited,
   saveFavorite,
@@ -14,12 +13,16 @@ import {
   addSeenPhrase,
 } from "../storage"
 import { resolveLangCode } from "../tts"
-import { ArrowLeft, Trash2, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft, X, Repeat, Star, Sparkles } from "lucide-react"
+import { ArrowLeft, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft, X, Repeat, Star, Sparkles, Plus, History } from "lucide-react"
 
 interface Props {
   persona: Persona
+  /** Which conversation messages load into / save to. */
+  conversationId?: string
   onBack: () => void
   onFavorites: () => void
+  onHistory: () => void
+  onNewChat: () => void
 }
 
 // A suggestion as it lives in component state: the server item plus a client
@@ -44,8 +47,8 @@ interface SuggestionBatch {
   items: SuggestionItem[]
 }
 
-export function TranslationChat({ persona, onBack, onFavorites }: Props) {
-  const [messages, setMessages] = useState<Message[]>(() => loadMessages(persona.id))
+export function TranslationChat({ persona, conversationId, onBack, onFavorites, onHistory, onNewChat }: Props) {
+  const [messages, setMessages] = useState<Message[]>(() => loadMessages(persona.id, conversationId))
   const [favoritedKeys, setFavoritedKeys] = useState<Set<string>>(() => {
     const keys = new Set<string>()
     messages.forEach((m) => {
@@ -57,7 +60,6 @@ export function TranslationChat({ persona, onBack, onFavorites }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [showConfirmClear, setShowConfirmClear] = useState(false)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [pendingText, setPendingText] = useState<string | null>(null)
   const [direction, setDirection] = useState<"to-target" | "from-target">("to-target")
@@ -155,6 +157,7 @@ export function TranslationChat({ persona, onBack, onFavorites }: Props) {
         direction,
         createdAt: Date.now(),
         debug,
+        conversationId,
       }
 
       saveMessage(msg)
@@ -268,6 +271,7 @@ export function TranslationChat({ persona, onBack, onFavorites }: Props) {
         register: item.register,
         honorificsUsed: item.honorificsUsed,
       },
+      conversationId,
     }
     saveMessage(msg)
     setMessages((prev) => [...prev, msg])
@@ -356,12 +360,6 @@ export function TranslationChat({ persona, onBack, onFavorites }: Props) {
     }
   }
 
-  function handleClear() {
-    clearMessages(persona.id)
-    setMessages([])
-    setShowConfirmClear(false)
-  }
-
   function handleDeleteTurn(messageId: string) {
     deleteMessage(messageId)
     setMessages((prev) => prev.filter((m) => m.id !== messageId))
@@ -388,29 +386,24 @@ export function TranslationChat({ persona, onBack, onFavorites }: Props) {
           >
             <Star size={16} />
           </button>
-          {messages.length > 0 && (
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => setShowConfirmClear(!showConfirmClear)}
-              aria-label="Clear all messages"
-            >
-              <Trash2 size={16} />
-            </button>
-          )}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={onNewChat}
+            title="New chat (archives the current one)"
+            aria-label="New chat"
+          >
+            <Plus size={16} />
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={onHistory}
+            title="Conversation history"
+            aria-label="Conversation history"
+          >
+            <History size={16} />
+          </button>
         </div>
       </header>
-
-      {showConfirmClear && (
-        <div className="clear-banner">
-          <span>Clear all messages?</span>
-          <button className="btn btn-danger btn-sm" onClick={handleClear}>
-            Clear
-          </button>
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowConfirmClear(false)}>
-            Cancel
-          </button>
-        </div>
-      )}
 
       {error && (
         <div className="clear-banner error-banner" role="alert">
