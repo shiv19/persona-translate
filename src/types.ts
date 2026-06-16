@@ -44,6 +44,7 @@ export interface Favorite {
   original: string
   translation: string
   direction: "to-target" | "from-target"
+  debug?: TranslationDebug | null
   notes?: string
   tags?: string[]
   createdAt: number

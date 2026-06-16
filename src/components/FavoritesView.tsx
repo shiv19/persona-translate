@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react"
 import type { Persona, Favorite } from "../types"
-import { loadFavorites, updateFavorite, removeFavorite } from "../storage"
+import { loadFavorites, updateFavorite, removeFavorite, saveFavorite } from "../storage"
 import { resolveLangCode } from "../tts"
 import { ArrowLeft, Search, X, Tag, StickyNote, Volume2, VolumeX, Copy, Check } from "lucide-react"
 
@@ -18,7 +18,7 @@ export function FavoritesView({ persona, onBack }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editNotes, setEditNotes] = useState("")
   const [editTags, setEditTags] = useState("")
-  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Favorite | null>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -56,24 +56,33 @@ export function FavoritesView({ persona, onBack }: Props) {
     return result
   }, [favorites, search, filterTag])
 
-  const commitDelete = useCallback((id: string) => {
-    removeFavorite(id)
-    setFavorites((prev) => prev.filter((f) => f.id !== id))
-    setPendingDeleteId(null)
+  const commitVisualRemove = useCallback(() => {
+    setPendingDelete(null)
   }, [])
 
-  function handleRemove(favoriteId: string) {
-    if (pendingDeleteId && pendingDeleteId !== favoriteId) {
-      if (timerRef.current) clearTimeout(timerRef.current)
-      commitDelete(pendingDeleteId)
+  function handleRemove(fav: Favorite) {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    if (pendingDelete) {
+      removeFavorite(pendingDelete.id)
+      setFavorites((prev) => prev.filter((f) => f.id !== pendingDelete.id))
     }
-    setPendingDeleteId(favoriteId)
-    timerRef.current = setTimeout(() => commitDelete(favoriteId), UNDO_DELAY)
+    removeFavorite(fav.id)
+    setPendingDelete(fav)
+    timerRef.current = setTimeout(() => {
+      setFavorites((prev) => prev.filter((f) => f.id !== fav.id))
+      setPendingDelete(null)
+    }, UNDO_DELAY)
   }
 
   function handleUndo() {
     if (timerRef.current) clearTimeout(timerRef.current)
-    setPendingDeleteId(null)
+    if (pendingDelete) {
+      loadFavorites(persona.id)
+      const restored = [...favorites, pendingDelete].sort((a, b) => b.createdAt - a.createdAt)
+      setFavorites(restored)
+      saveFavorite(pendingDelete)
+    }
+    setPendingDelete(null)
   }
 
   function startEditing(fav: Favorite) {
@@ -186,7 +195,7 @@ export function FavoritesView({ persona, onBack }: Props) {
         </div>
       )}
 
-      {pendingDeleteId && (
+      {pendingDelete && (
         <div className="favorites-undo-banner">
           <span>Favorite removed</span>
           <button className="btn btn-ghost btn-sm" onClick={handleUndo}>
@@ -212,7 +221,7 @@ export function FavoritesView({ persona, onBack }: Props) {
         )}
 
         {filtered.map((fav) => {
-          const isPendingDelete = fav.id === pendingDeleteId
+          const isPendingDelete = pendingDelete?.id === fav.id
           return (
             <div key={fav.id} className={`favorite-card ${isPendingDelete ? "pending-delete" : ""}`}>
               <div className="favorite-card-body">
@@ -268,6 +277,21 @@ export function FavoritesView({ persona, onBack }: Props) {
                   </div>
                   {fav.translation}
                 </div>
+                {fav.debug && (
+                  <details className="debug-details">
+                    <summary>Grammar</summary>
+                    <dl className="debug-grid">
+                      <dt>Speaker</dt>
+                      <dd>{fav.debug.speaker}</dd>
+                      <dt>Register</dt>
+                      <dd>{fav.debug.register}</dd>
+                      <dt>Honorifics</dt>
+                      <dd>{fav.debug.honorificsUsed}</dd>
+                      <dt>Referents</dt>
+                      <dd>{fav.debug.referents}</dd>
+                    </dl>
+                  </details>
+                )}
                 {fav.tags && fav.tags.length > 0 && editingId !== fav.id && (
                   <div className="favorite-card-tags">
                     {fav.tags.map((tag) => (
@@ -339,7 +363,7 @@ export function FavoritesView({ persona, onBack }: Props) {
                   </button>
                   <button
                     className="btn btn-ghost btn-sm btn-danger"
-                    onClick={() => handleRemove(fav.id)}
+                    onClick={() => handleRemove(fav)}
                     title="Remove from favorites"
                     aria-label="Remove from favorites"
                   >

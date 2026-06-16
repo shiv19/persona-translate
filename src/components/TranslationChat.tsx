@@ -159,6 +159,7 @@ export function TranslationChat({ persona, onBack, onFavorites }: Props) {
         original: msg.original,
         translation: msg.translation,
         direction: msg.direction,
+        debug: msg.debug,
         createdAt: Date.now(),
       })
       setFavoritedKeys((prev) => new Set(prev).add(key))
@@ -313,7 +314,7 @@ export function TranslationChat({ persona, onBack, onFavorites }: Props) {
               <div className="chat-bubble-text">{msg.translation}</div>
               {msg.debug && (
                 <details className="debug-details">
-                  <summary>Debug</summary>
+                  <summary>Grammar</summary>
                   <dl className="debug-grid">
                     <dt>Speaker</dt>
                     <dd>{msg.debug.speaker}</dd>
