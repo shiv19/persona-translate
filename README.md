@@ -9,7 +9,7 @@ you "how do I say X to my wife's traditional mother from central Vietnam?" —
 and the kinship terms (`Mẹ`, not `Bà`), self-reference (`con`, not `mẹ vợ`),
 and register particles (`ạ`, `ơi`) come out correct every time.
 
-Powered by [GLM-5.2](https://z.ai) via Z.ai's API. React + Vite client, a
+Powered by [GLM-5.1](https://z.ai) via Z.ai's API. React + Vite client, a
 minimal Node server (key stays server-side), localStorage persistence. No
 accounts, no backend database — it's a personal app.
 
@@ -88,7 +88,7 @@ no `VITE_` prefix and is never bundled into the client.
 ```
 ZAI_API_KEY=...        # required — server-side only
 ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
-ZAI_MODEL=glm-5.2
+ZAI_MODEL=glm-5.1
 ```
 
 ## Architecture
@@ -201,7 +201,7 @@ any reverse proxy or tunnel.
 
 - **React 19** + **Vite 7** (client)
 - **Node 22+** `http` server (no Express — minimal)
-- **GLM-5.2** via the OpenAI-compatible Z.ai endpoint
+- **GLM-5.1** via the OpenAI-compatible Z.ai endpoint
 - **Zod** for tool-call schema validation
 - **react-markdown** + **rehype-sanitize** for Ask-mode answers
 - **lucide-react** icons

@@ -6,7 +6,7 @@ import { withRetry } from "./retry.js"
 const BASE_URL = process.env.ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4"
 const IS_ZAI = BASE_URL.includes("z.ai")
 
-const MODEL = process.env.ZAI_MODEL || "glm-5.2"
+const MODEL = process.env.ZAI_MODEL || "glm-5.1"
 export const MAX_HISTORY = 5
 
 // Lazily construct the OpenAI client so a missing ZAI_API_KEY doesn't crash
@@ -73,7 +73,7 @@ export interface TranslationDebug {
 //
 // We use Function Calling (tools) rather than response_format: json_object,
 // because json_object only guarantees valid JSON — it does NOT enforce the
-// schema, so GLM-5.2 happily returns {"translation":"..."} and omits every
+// schema, so GLM-5.1 happily returns {"translation":"..."} and omits every
 // debug field. With tools, the model must populate arguments matching the
 // JSON Schema, so the debug fields actually come back populated.
 // ---------------------------------------------------------------------------
@@ -290,7 +290,7 @@ export async function serverTranslate(
       // Z.ai only supports "auto", but with exactly one tool defined and the
       // system prompt instructing the model to call it, GLM reliably invokes it.
       tool_choice: "auto",
-      // Z.ai-specific: disable GLM-5.2 reasoning/thinking tokens for speed.
+      // Z.ai-specific: disable GLM-5.1 reasoning/thinking tokens for speed.
       ...({ thinking: { type: "disabled" } } as object),
     }),
   )

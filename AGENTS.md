@@ -26,7 +26,7 @@ new AI endpoint, decide which history view it gets — most want translation-onl
 The `kind: "translation" | "note"` discriminator on `Message` drives this.
 Legacy messages (no `kind`) are treated as translations.
 
-## GLM-5.2 gotchas
+## GLM-5.1 gotchas
 
 - **Tool calls over `response_format: json_object`.** The schema isn't
   enforced with json_object — GLM happily omits fields. Translate and suggest

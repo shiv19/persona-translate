@@ -7,7 +7,7 @@ import { withRetry } from "../server/retry.js"
 // chosen for cost/simplicity. To swap in a stronger judge later, change only
 // this file — test cases stay untouched.
 const BASE_URL = process.env.ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4"
-const MODEL = process.env.ZAI_JUDGE_MODEL || process.env.ZAI_MODEL || "glm-5.2"
+const MODEL = process.env.ZAI_JUDGE_MODEL || process.env.ZAI_MODEL || "glm-5.1"
 
 let _client: OpenAI | null = null
 function client(): OpenAI {
