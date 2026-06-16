@@ -1,4 +1,4 @@
-import type { Persona, Message } from "./types"
+import type { Persona, Message, Suggestion } from "./types"
 import type { TranslateOutput } from "./ai"
 
 // The client never holds the API key. All requests go to our own backend
@@ -27,6 +27,32 @@ export async function translateViaApi(
   }
 
   return (await res.json()) as TranslateOutput
+}
+
+export async function suggestViaApi(
+  persona: Persona,
+  situation: string,
+  avoid: string[] = [],
+  count = 3,
+  direction: "to-target" | "from-target" = "to-target",
+  history: Message[] = [],
+): Promise<{ suggestions: Suggestion[] }> {
+  const res = await fetch(`${API_BASE}/api/suggest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ persona, situation, avoid, count, direction, history }),
+  })
+
+  if (!res.ok) {
+    let message = `Suggestion failed (${res.status})`
+    try {
+      const data = await res.json()
+      if (data?.error) message = data.error
+    } catch {}
+    throw new Error(message)
+  }
+
+  return (await res.json()) as { suggestions: Suggestion[] }
 }
 
 // ---------------------------------------------------------------------------

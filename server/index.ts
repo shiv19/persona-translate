@@ -4,7 +4,7 @@ import { existsSync } from "node:fs"
 import { extname, join, normalize, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Persona, Message } from "./zai.js"
-import { serverTranslate, serverTranscribe } from "./zai.js"
+import { serverTranslate, serverTranscribe, serverSuggest } from "./zai.js"
 
 // Load .env from the project root if present. Works under both tsx (dev) and
 // node (prod) — no --env-file flag needed. Safe to skip if the file is absent
@@ -149,6 +149,15 @@ interface TranslateRequest {
   direction?: "to-target" | "from-target"
 }
 
+interface SuggestRequest {
+  persona: Persona
+  situation: string
+  avoid?: string[]
+  count?: number
+  direction?: "to-target" | "from-target"
+  history?: Message[]
+}
+
 async function handleTranslate(req: http.IncomingMessage, res: http.ServerResponse) {
   if (!process.env.ZAI_API_KEY) {
     send(res, 500, { error: "Server missing ZAI_API_KEY" })
@@ -175,6 +184,35 @@ async function handleTranslate(req: http.IncomingMessage, res: http.ServerRespon
   } catch (err) {
     console.error("[translate] error:", err)
     send(res, 502, { error: err instanceof Error ? err.message : "Translation failed" })
+  }
+}
+
+async function handleSuggest(req: http.IncomingMessage, res: http.ServerResponse) {
+  if (!process.env.ZAI_API_KEY) {
+    send(res, 500, { error: "Server missing ZAI_API_KEY" })
+    return
+  }
+
+  let body: SuggestRequest
+  try {
+    body = await readJsonBody<SuggestRequest>(req)
+  } catch {
+    send(res, 400, { error: "Invalid JSON body" })
+    return
+  }
+
+  const { persona, situation, avoid = [], count = 3, direction = "to-target", history = [] } = body
+  if (!persona || typeof situation !== "string" || !situation.trim()) {
+    send(res, 400, { error: "Missing persona or situation" })
+    return
+  }
+
+  try {
+    const result = await serverSuggest(persona, situation, avoid, count, direction, history)
+    send(res, 200, result)
+  } catch (err) {
+    console.error("[suggest] error:", err)
+    send(res, 502, { error: err instanceof Error ? err.message : "Suggestion failed" })
   }
 }
 
@@ -234,6 +272,11 @@ const server = http.createServer(async (req, res) => {
 
   if (path === "/api/translate" && method === "POST") {
     await handleTranslate(req, res)
+    return
+  }
+
+  if (path === "/api/suggest" && method === "POST") {
+    await handleSuggest(req, res)
     return
   }
 

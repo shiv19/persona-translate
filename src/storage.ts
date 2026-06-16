@@ -52,6 +52,7 @@ export function deletePersona(personaId: string): void {
   savePersonas(personas)
   clearMessages(personaId)
   clearFavorites(personaId)
+  clearSeenPhrases(personaId)
 }
 
 const FAVORITES_KEY = "pt_favorites"
@@ -109,4 +110,56 @@ export function updateFavorite(favoriteId: string, updates: { notes?: string; ta
 
 function clearFavorites(personaId: string): void {
   saveAllFavorites(loadAllFavorites().filter((f) => f.personaId !== personaId))
+}
+
+// ---------------------------------------------------------------------------
+// Seen-phrases — the anti-repeat list for situational suggestions.
+//
+// When the user saves or discards a suggested phrase, its `original` is added
+// here so the server is told NOT to regenerate it next time. This is invisible
+// to the user (it never renders) and is independent of conversation history —
+// clearing the chat does NOT clear seen-phrases, only deleting the persona does.
+// Keepers also live on as Favorites (tagged "suggested"); this list exists
+// purely so discarded ones aren't suggested again.
+// ---------------------------------------------------------------------------
+
+const SEEN_KEY = "pt_seen_phrases"
+
+interface SeenPhraseRecord {
+  personaId: string
+  original: string
+}
+
+function loadAllSeen(): SeenPhraseRecord[] {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+function saveAllSeen(all: SeenPhraseRecord[]): void {
+  localStorage.setItem(SEEN_KEY, JSON.stringify(all))
+}
+
+export function loadSeenPhrases(personaId: string): string[] {
+  return loadAllSeen()
+    .filter((s) => s.personaId === personaId)
+    .map((s) => s.original)
+}
+
+export function addSeenPhrase(personaId: string, original: string): void {
+  const trimmed = original.trim()
+  if (!trimmed) return
+  const all = loadAllSeen()
+  const exists = all.some((s) => s.personaId === personaId && s.original === trimmed)
+  if (!exists) {
+    all.push({ personaId, original: trimmed })
+    saveAllSeen(all)
+  }
+}
+
+export function clearSeenPhrases(personaId: string): void {
+  saveAllSeen(loadAllSeen().filter((s) => s.personaId !== personaId))
 }

@@ -50,6 +50,18 @@ export interface Favorite {
   createdAt: number
 }
 
+// A situational phrase suggestion returned by the server. Ephemeral UI state —
+// never persisted directly. When the user keeps one, it graduates into a
+// Favorite (tagged "suggested"); when discarded, its `original` is recorded in
+// the per-persona seen-phrases list so the server avoids regenerating it.
+export interface Suggestion {
+  original: string
+  translation: string
+  register?: string
+  honorificsUsed?: string
+  note?: string
+}
+
 export function uid(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
     return crypto.randomUUID()

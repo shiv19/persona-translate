@@ -887,6 +887,210 @@ body {
   color: var(--accent-hover);
 }
 
+/* ── Composer: suggest mode + toggle row ── */
+
+.chat-toggle-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.chat-toggle-row .chat-speaker-toggle {
+  flex: 1;
+}
+
+/* When both toggles share a row, the suggest toggle stays prominent and the
+   direction toggle recedes when suggest mode is active (it's locked). */
+.chat-speaker-toggle.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Tint the textarea subtly so the mode change is visible without a modal. */
+.chat-input-suggest::placeholder {
+  color: var(--accent);
+  opacity: 0.7;
+}
+
+/* The send button turns into the Suggest action — tint it to match. */
+.chat-send-btn-suggest {
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.chat-send-btn-suggest:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+/* ── Suggestion batch (situational phrase results) ── */
+
+.suggestion-batch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 12px;
+  margin: var(--space-2) 0;
+  background: var(--bg-elevated);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+}
+
+.suggestion-batch-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.suggestion-batch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.suggestion-batch-situation {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Small chip showing whose perspective the batch is from (You → them, or
+   them → You). Mirrors the toggled-accent look so it reads as a label, not a
+   button. */
+.suggestion-batch-speaker {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.suggestion-batch-speaker.toggled {
+  color: var(--accent);
+  border-color: var(--accent-glow);
+  background: var(--accent-glow);
+}
+
+/* The language name is a subdued suffix on the speaker-action label
+   ("You say · English"). Lower weight so the speaker action leads. */
+.suggestion-item-lang {
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+.suggestion-batch-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.suggestion-batch-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+}
+
+.suggestion-batch-loading {
+  padding: var(--space-3);
+  display: flex;
+  justify-content: center;
+}
+
+.suggestion-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.suggestion-item-saved {
+  opacity: 0.7;
+  border-color: var(--accent-glow);
+}
+
+/* "Used" = promoted into the conversation thread. Subtler than saved — it
+   stays fully readable (the user may still act on it) but gets a left accent
+   bar so it's scannable which ones are already in the thread. */
+.suggestion-item-used {
+  border-left: 3px solid var(--accent);
+}
+
+.suggestion-item-number {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+  min-width: 16px;
+}
+
+.suggestion-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.suggestion-item-original,
+.suggestion-item-translation {
+  display: flex;
+  flex-direction: column;
+}
+
+.suggestion-item-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.suggestion-item-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.suggestion-item-translation {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.suggestion-item-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.suggestion-item-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.suggestion-item-saved-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-top: 2px;
+}
+
 /* ── Favorites page ── */
 
 .favorites-screen {
@@ -1183,8 +1387,10 @@ body {
     width: 100%;
   }
 
-  .app-main .chat-screen {
+  .app-main .chat-screen,
+  .app-main .favorites-screen {
     width: 100%;
+    max-width: none;
   }
 
   /* Keep chat bubbles readable on wide panes */

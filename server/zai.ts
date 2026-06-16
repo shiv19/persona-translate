@@ -142,8 +142,15 @@ PEOPLE WHO MAY BE MENTIONED (this roster is AUTHORITATIVE — relationships are 
 ${lines.join("\n")}`
 }
 
-function buildSystemPrompt(persona: Persona, direction: "to-target" | "from-target"): string {
-  const speakerIsUser = direction === "to-target"
+// Shared persona-context block used by both the translate prompt (below) and
+// the suggest prompt. Keeping this in one place means the kinship / address /
+// first-person / people-roster rules never diverge between the two tasks.
+//
+// `speakerIsUser` controls which side of the relationship is speaking, which
+// flips the address-term and self-reference derivation. buildSystemPrompt passes
+// direction === "to-target"; buildSuggestPrompt always passes true (the user is
+// producing phrases to say to the persona).
+function buildPersonaContext(persona: Persona, speakerIsUser: boolean): string {
   const speakerName = speakerIsUser ? "the user" : persona.name
   const listenerName = speakerIsUser ? persona.name : "the user"
   const speakerRelationship = speakerIsUser
@@ -178,15 +185,19 @@ function buildSystemPrompt(persona: Persona, direction: "to-target" | "from-targ
   // NEVER with a third-person descriptor like "mẹ vợ" (wife's mother).
   const firstPersonLine = `FIRST-PERSON SELF-REFERENCE: The speaker refers to THEMSELVES using the correct first-person pronoun for this relationship in ${persona.targetLanguage} — never in the third person, never by their role title. (Vietnamese: a younger speaker addressing an elder uses "con" for themselves, NOT "mẹ vợ"/"con rể" — those are descriptors others use about them, not words they call themselves.)`
 
-  return `You are an expert translator specializing in ${persona.targetLanguage}.
-
-The current message is spoken by ${speakerName} and addressed to ${listenerName}.
+  return `The current message is spoken by ${speakerName} and addressed to ${listenerName}.
 
 Context:
 - ${speakerRelationship}
 - ${addressLine}
 - ${firstPersonLine}
-- Additional context: ${persona.context}${buildPeopleRoster(persona, direction)}
+- Additional context: ${persona.context}${buildPeopleRoster(persona, speakerIsUser ? "to-target" : "from-target")}`
+}
+
+function buildSystemPrompt(persona: Persona, direction: "to-target" | "from-target"): string {
+  return `You are an expert translator specializing in ${persona.targetLanguage}.
+
+${buildPersonaContext(persona, direction === "to-target")}
 
 IMPORTANT RULES:
 1. DETECT THE INPUT LANGUAGE and translate INTO THE OTHER language — never echo the input language. If the input is ${persona.sourceLanguage}, output ${persona.targetLanguage}. If the input is ${persona.targetLanguage}, output ${persona.sourceLanguage}.
@@ -351,6 +362,231 @@ function parseTranslation(text: string) {
 
   const result = TranslationResult.safeParse(obj)
   return result.success ? result.data : null
+}
+
+// ---------------------------------------------------------------------------
+// SITUATIONAL PHRASE SUGGESTIONS
+//
+// Unlike translate (one phrase in → one translation out), suggest generates a
+// small batch of phrases the user could plausibly say to this specific person
+// in a described situation. It reuses buildPersonaContext so the same kinship /
+// address / roster rules apply — a suggestion for "Mom (Mẹ vợ)" correctly uses
+// "ạ" and "con", while the same situation for a peer friend is casual.
+//
+// The result is an ARRAY. GLM's tool-calling supports array-valued properties
+// in the arguments JSON (we wrap it in { suggestions: [...] }), which is more
+// reliable than asking for a bare top-level array.
+// ---------------------------------------------------------------------------
+
+const SuggestionItem = z.object({
+  original: z
+    .string()
+    .describe("A natural phrase in the source language the user could say in this situation. Plain text, no quotes, no romanization, no notes."),
+  translation: z
+    .string()
+    .describe("The target-language translation of 'original' — natural spoken register with the correct kinship terms, pronouns, and particles for this relationship. Plain text only."),
+  register: z
+    .string()
+    .describe("The register/formality chosen and a one-sentence reason it fits this relationship"),
+  honorificsUsed: z
+    .string()
+    .describe("The specific honorifics, pronouns, particles, and address terms used in the translation, with brief explanation"),
+  note: z
+    .string()
+    .describe("One short sentence on why this phrase is useful in the described situation"),
+})
+
+const SuggestResult = z.object({
+  suggestions: z
+    .array(SuggestionItem)
+    .min(1)
+    .max(5)
+    .describe("Distinct phrase suggestions for the situation"),
+})
+
+const SUGGEST_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "record_suggestions",
+    description: "Record the generated phrase suggestions for the situation. You MUST call this tool to return your suggestions — do not output them as plain text.",
+    parameters: {
+      type: "object",
+      properties: {
+        suggestions: {
+          type: "array",
+          minItems: 1,
+          maxItems: 5,
+          items: {
+            type: "object",
+            properties: {
+              original: { type: "string", description: "A natural source-language phrase the user could say in this situation. Plain text, no quotes, no notes." },
+              translation: { type: "string", description: "The target-language translation — natural spoken register with correct kinship/pronouns/particles. Plain text only." },
+              register: { type: "string", description: "Register chosen and one-sentence reason it fits this relationship" },
+              honorificsUsed: { type: "string", description: "Specific honorifics, pronouns, particles, and address terms used, with brief explanation" },
+              note: { type: "string", description: "One short sentence on why this phrase is useful in the situation" },
+            },
+            required: ["original", "translation", "register", "honorificsUsed", "note"],
+          },
+        },
+      },
+      required: ["suggestions"],
+    },
+  },
+}
+
+export interface SuggestionItemParsed extends z.infer<typeof SuggestionItem> {}
+
+export interface SuggestOutput {
+  suggestions: SuggestionItemParsed[]
+}
+
+function buildSuggestPrompt(
+  persona: Persona,
+  situation: string,
+  avoid: string[],
+  count: number,
+  direction: "to-target" | "from-target",
+): string {
+  const avoidBlock = avoid.length > 0
+    ? `\n\nALREADY GENERATED (do NOT repeat or produce near-duplicates of these — different wording AND different intent):\n${avoid.map((p) => `- ${p}`).join("\n")}`
+    : ""
+
+  // Who is speaking in this batch? to-target = the USER produces phrases
+  // (production practice); from-target = the PERSONA produces them
+  // (comprehension practice — what the user might hear). This flips whose
+  // kinship/pronoun/register logic the target-language side must exercise.
+  const userSpeaking = direction === "to-target"
+  const speaker = userSpeaking ? "the user" : persona.name
+  const listener = userSpeaking ? persona.name : "the user"
+
+  return `You are an expert language coach specializing in ${persona.targetLanguage}.
+You generate realistic, useful phrases for a learner, in a specific situation, involving a specific person.
+
+${buildPersonaContext(persona, userSpeaking)}
+
+SITUATION THE USER IS PREPARING FOR:
+"${situation}"
+
+TASK: Generate exactly ${count} distinct phrases that ${speaker} could plausibly say to ${listener} in this situation.
+
+FIELD RULE (never changes): "original" is ALWAYS ${persona.sourceLanguage}. "translation" is ALWAYS ${persona.targetLanguage}. Whoever is speaking, ${persona.sourceLanguage} goes in "original" and ${persona.targetLanguage} goes in "translation".
+
+KINSHIP IS THE WHOLE POINT — never default to generic terms. For ${speaker} speaking to ${listener}: derive the PRECISE kinship/address term for the listener and the correct first-person self-reference from the relationship, every single time. NEVER fall back on generic age-based pronouns (Vietnamese: do NOT use "Anh"/"Chị"/"Bà"/"Ông" as a default when a precise kinship term exists). ${userSpeaking ? `The user addressing ${persona.name} uses the term in "HOW TO ADDRESS THE LISTENER" and refers to themselves with the first-person term in "FIRST-PERSON SELF-REFERENCE".` : `${persona.name} addressing the user derives the term from the relationship, and refers to ${persona.name}self with the correct elder/self term.`} If earlier conversation turns are provided, they show the correct terms in action — USE those terms as the authoritative example, but still re-derive them from the relationship rules each time (never copy blindly, in case a turn contained a mistake).
+
+The phrases must:
+1. BE SITUATIONALLY REAL. Things a real person in this relationship would actually say here — not textbook templates, not generic greetings unless the situation calls for one.
+2. EXERCISE THE RELATIONSHIP. The ${persona.targetLanguage} side ("translation") must use the correct kinship term, pronoun, self-reference, and register for ${speaker} speaking to ${listener}. Apply the address, first-person, and people-roster rules from the context above exactly as a translator would.
+3. VARY IN FUNCTION across the batch — e.g. asking something, stating something, making a request, expressing gratitude or concern. Do not produce ${count} variations of the same sentence.
+4. BE SELF-CONTAINED. Each phrase is a complete utterance that could be said on its own. Keep them short and spoken (1–2 sentences), not paragraphs.
+
+Return exactly ${count} phrases (unless the situation genuinely can't support that many). You MUST call the record_suggestions tool with all fields filled. Decide the kinship/pronoun/register for the ${persona.targetLanguage} side FIRST, then write it.${avoidBlock}`
+}
+
+/**
+ * Generate situational phrase suggestions. Mirrors serverTranslate's structure:
+ * tool-call primary path, lenient JSON-array fallback, same retry/temperature
+ * handling. `count` is clamped server-side so a bad client request can't ask
+ * for hundreds. `direction` controls whose perspective the phrases come from
+ * (to-target = user speaking, from-target = persona speaking). `history` is the
+ * recent conversation (direction-labeled) — it anchors the kinship terms by
+ * showing the correct ones in action, which prevents the model defaulting to
+ * generic pronouns (e.g. Vietnamese Anh/Chị) when the relationship is ambiguous.
+ */
+export async function serverSuggest(
+  persona: Persona,
+  situation: string,
+  avoid: string[] = [],
+  count = 3,
+  direction: "to-target" | "from-target" = "to-target",
+  history: Message[] = [],
+): Promise<SuggestOutput> {
+  const n = Math.max(1, Math.min(5, Math.floor(count)))
+  const recentHistory = history.slice(-MAX_HISTORY)
+
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: "system", content: buildSuggestPrompt(persona, situation, avoid, n, direction) },
+    // Direction-labeled prior turns. buildHistoryMessages tags each with
+    // [You speaking to X] / [X speaking to you], so the model can read the
+    // correct honorifics regardless of the suggest batch's own direction.
+    ...buildHistoryMessages(persona, recentHistory),
+    { role: "user", content: situation },
+  ]
+
+  const response = await withRetry(() =>
+    client().chat.completions.create({
+      model: MODEL,
+      messages,
+      // Slightly higher than translate's 0.3 — we want variety across batches
+      // and across regenerations of the same situation.
+      temperature: 0.6,
+      tools: [SUGGEST_TOOL],
+      tool_choice: "auto",
+      ...({ thinking: { type: "disabled" } } as object),
+    }),
+  )
+
+  const message = response.choices[0]?.message
+
+  // Primary path: parse the tool call arguments (schema-enforced array).
+  const toolCall = message?.tool_calls?.[0]
+  if (toolCall && toolCall.type === "function" && "function" in toolCall) {
+    const parsed = parseSuggestArguments(toolCall.function.arguments)
+    if (parsed) return { suggestions: parsed }
+  }
+
+  // Fallback: salvage from plain content (extend extractJson for arrays).
+  const raw = message?.content ?? ""
+  const parsed = parseSuggestions(raw)
+  if (parsed) return { suggestions: parsed }
+
+  return { suggestions: [] }
+}
+
+function parseSuggestArguments(argsJson: string): SuggestionItemParsed[] | null {
+  try {
+    const obj = JSON.parse(argsJson)
+    const result = SuggestResult.safeParse(obj)
+    return result.success ? result.data.suggestions : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Lenient fallback when the model emits plain content instead of a tool call.
+ * Handles both { suggestions: [...] } objects and bare [...] arrays, and
+ * salvages partial items (only items that validate against SuggestionItem are
+ * kept) so a single bad item doesn't lose the whole batch.
+ */
+function parseSuggestions(text: string): SuggestionItemParsed[] | null {
+  const json = extractJson(text)
+
+  // Bare array.
+  if (Array.isArray(json)) {
+    const items = json.flatMap((j) => {
+      const r = SuggestionItem.safeParse(j)
+      return r.success ? [r.data] : []
+    })
+    return items.length > 0 ? items : null
+  }
+
+  if (json && typeof json === "object") {
+    const obj = json as Record<string, unknown>
+    const arr = Array.isArray(obj.suggestions)
+      ? obj.suggestions
+      : Array.isArray(obj.phrases)
+        ? obj.phrases
+        : null
+    if (arr) {
+      const items = arr.flatMap((j) => {
+        const r = SuggestionItem.safeParse(j)
+        return r.success ? [r.data] : []
+      })
+      return items.length > 0 ? items : null
+    }
+  }
+
+  return null
 }
 
 // ---------------------------------------------------------------------------
