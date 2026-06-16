@@ -1,10 +1,14 @@
 {
-  "name": "translate",
+  "name": "persona-translate",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "engines": {
     "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shiv19/persona-translate.git"
   },
   "scripts": {
     "dev": "concurrently -n vite,api -c cyan,magenta \"vite --port 3133\" \"tsx watch server/index.ts\"",
