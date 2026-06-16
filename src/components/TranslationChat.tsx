@@ -614,7 +614,7 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
                 <div className="chat-bubble-text">{msg.translation}</div>
                 {msg.debug && (
                   <details className="debug-details">
-                    <summary>Grammar</summary>
+                    <summary>Breakdown</summary>
                     <dl className="debug-grid">
                       <dt>Speaker</dt>
                       <dd>{msg.debug.speaker}</dd>
