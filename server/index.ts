@@ -4,7 +4,7 @@ import { existsSync } from "node:fs"
 import { extname, join, normalize, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Persona, Message } from "./zai.js"
-import { serverTranslate, serverTranscribe, serverSuggest, serverAsk } from "./zai.js"
+import { serverTranslate, serverSuggest, serverAsk } from "./zai.js"
 
 // Load .env from the project root if present. Works under both tsx (dev) and
 // node (prod) — no --env-file flag needed. Safe to skip if the file is absent
@@ -91,24 +91,6 @@ function readJsonBody<T = unknown>(req: http.IncomingMessage, limit = 5 * 1024 *
         reject(err)
       }
     })
-    req.on("error", reject)
-  })
-}
-
-function readRawBody(req: http.IncomingMessage, limit = 25 * 1024 * 1024): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    req.on("data", (chunk: Buffer) => {
-      size += chunk.length
-      if (size > limit) {
-        reject(new Error("Payload too large"))
-        req.destroy()
-        return
-      }
-      chunks.push(chunk)
-    })
-    req.on("end", () => resolve(Buffer.concat(chunks)))
     req.on("error", reject)
   })
 }
@@ -252,45 +234,6 @@ async function handleAsk(req: http.IncomingMessage, res: http.ServerResponse) {
   }
 }
 
-async function handleAsr(req: http.IncomingMessage, res: http.ServerResponse) {
-  if (!process.env.ZAI_API_KEY) {
-    send(res, 500, { error: "Server missing ZAI_API_KEY" })
-    return
-  }
-
-  // The client sends multipart/form-data with a "file" field (the WAV blob).
-  // Parse it manually with Node 20+'s Undici FormData.
-  const contentType = req.headers["content-type"] || ""
-  if (!contentType.includes("multipart/form-data")) {
-    send(res, 400, { error: "Expected multipart/form-data" })
-    return
-  }
-
-  try {
-    const buf = await readRawBody(req)
-    // Node 20+ exposes Request/FormData globally (via Undici). Build a Request
-    // so we can parse multipart/form-data without an extra dependency.
-    const request = new Request("http://localhost", {
-      method: "POST",
-      headers: { "content-type": contentType },
-      body: buf,
-      // Required by the WHATWG fetch spec for request bodies carrying a buffer.
-      duplex: "half",
-    })
-    const form = await request.formData()
-    const file = form.get("file")
-    if (!(file instanceof Blob)) {
-      send(res, 400, { error: "Missing 'file' in form data" })
-      return
-    }
-    const text = await serverTranscribe(file)
-    send(res, 200, { text })
-  } catch (err) {
-    console.error("[asr] error:", err)
-    send(res, 502, { error: err instanceof Error ? err.message : "Transcription failed" })
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
@@ -318,11 +261,6 @@ const server = http.createServer(async (req, res) => {
 
   if (path === "/api/ask" && method === "POST") {
     await handleAsk(req, res)
-    return
-  }
-
-  if (path === "/api/asr" && method === "POST") {
-    await handleAsr(req, res)
     return
   }
 

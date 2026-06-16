@@ -692,34 +692,3 @@ export async function serverAsk(
   const answer = response.choices[0]?.message?.content ?? ""
   return { answer: answer.trim() }
 }
-
-// ---------------------------------------------------------------------------
-// ASR — moved from the old src/asr.ts. The key is now server-side.
-// ---------------------------------------------------------------------------
-
-export async function serverTranscribe(audio: Blob): Promise<string> {
-  console.log("[ASR] Input:", audio.size, "bytes, type:", audio.type)
-
-  const formData = new FormData()
-  formData.append("model", "glm-asr-2512")
-  formData.append("file", audio, "recording.wav")
-  formData.append("stream", "false")
-
-  const response = await fetch(`${BASE_URL}/audio/transcriptions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.ZAI_API_KEY}`,
-    },
-    body: formData,
-  })
-
-  if (!response.ok) {
-    const err = await response.text()
-    console.error("[ASR] Error:", response.status, err)
-    throw new Error(`ASR ${response.status}: ${err}`)
-  }
-
-  const data = (await response.json()) as { text?: string }
-  console.log("[ASR] Response:", JSON.stringify(data))
-  return data.text ?? ""
-}
