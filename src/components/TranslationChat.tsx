@@ -195,41 +195,69 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
   // translation. The answer comes back as markdown and is saved as a note
   // (kind: "note") interleaved in the conversation. Notes are excluded from
   // translate context but included in ask context, so follow-ups chain.
+  // Ask mode flow — STREAMING. The note message is created up-front (empty
+  // answer) and appended immediately so the bubble renders as a placeholder.
+  // As deltas arrive from the server, we grow the note's `translation` field
+  // in place and the markdown re-renders live. On `done` we persist the final
+  // message to storage. On error we drop the partial note (no half-answers
+  // saved to history) and surface the error with a retry path.
   async function handleAsk(question: string) {
     const currentQuote = quote
     setInput("")
     setAskMode(false)
     setQuote(null)
-    setPendingText(question)
-    setLoading(true)
-    setLoadingMode("ask")
     setError(null)
 
+    // Create the note up-front with a stable id. We render it immediately so
+    // the user sees their question + an empty answer that grows. The loading
+    // placeholder (typing-indicator) isn't used here — the streaming answer
+    // itself is the feedback that work is happening.
+    const noteId = uid()
+    const placeholder: Message = {
+      id: noteId,
+      personaId: persona.id,
+      original: question,
+      translation: "",
+      direction: "to-target", // unused for notes; required by the type
+      createdAt: Date.now(),
+      conversationId,
+      kind: "note",
+      quote: currentQuote ?? undefined,
+    }
+    setMessages((prev) => [...prev, placeholder])
+
     try {
-      const answer = await ask(persona, question, messages, currentQuote ?? undefined)
-      const msg: Message = {
-        id: uid(),
-        personaId: persona.id,
-        original: question,
-        translation: answer,
-        direction: "to-target", // unused for notes; required by the type
-        createdAt: Date.now(),
-        conversationId,
-        kind: "note",
-        quote: currentQuote ?? undefined,
+      let full = ""
+      for await (const ev of ask(persona, question, messages, currentQuote ?? undefined)) {
+        if (ev.delta) {
+          full += ev.delta
+          // Grow the answer in place — the note bubble re-renders the markdown
+          // with each chunk. Use functional update keyed on the note id.
+          setMessages((prev) =>
+            prev.map((m) => (m.id === noteId ? { ...m, translation: full } : m)),
+          )
+        } else if (ev.done !== undefined) {
+          full = ev.done
+          setMessages((prev) =>
+            prev.map((m) => (m.id === noteId ? { ...m, translation: full } : m)),
+          )
+        } else if (ev.error) {
+          throw new Error(ev.error)
+        }
       }
-      saveMessage(msg)
-      setMessages((prev) => [...prev, msg])
+      // Persist the completed note. (We only save on success — partial notes
+      // from a failed stream are discarded so history stays clean.)
+      saveMessage({ ...placeholder, translation: full })
     } catch (err) {
       const message = err instanceof Error ? err.message : "Answer failed"
+      // Drop the partial note — don't leave a half-answer in the conversation.
+      setMessages((prev) => prev.filter((m) => m.id !== noteId))
       setError(message)
       setInput(question)
       // Restore the quote so the user can retry without re-quoting.
       if (currentQuote) setQuote(currentQuote)
       setAskMode(true)
     } finally {
-      setPendingText(null)
-      setLoading(false)
       inputRef.current?.focus()
     }
   }

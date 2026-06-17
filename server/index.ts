@@ -4,7 +4,7 @@ import { existsSync } from "node:fs"
 import { extname, join, normalize, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Persona, Message } from "./zai.js"
-import { serverTranslate, serverSuggest, serverAsk } from "./zai.js"
+import { serverTranslate, serverSuggest, serverAskStream } from "./zai.js"
 
 // Load .env from the project root if present. Works under both tsx (dev) and
 // node (prod) — no --env-file flag needed. Safe to skip if the file is absent
@@ -245,12 +245,35 @@ async function handleAsk(req: http.IncomingMessage, res: http.ServerResponse) {
     return
   }
 
+  // SSE streaming response. Events:
+  //   data: {"type":"delta","text":"..."}   — incremental answer fragment
+  //   data: {"type":"done","answer":"..."}  — final complete answer
+  //   data: {"type":"error","error":"..."}  — failure (mid-stream or otherwise)
+  // The client (fetch + ReadableStream reader) parses these line by line and
+  // grows the answer live. Errors before the stream starts are sent as JSON
+  // (the client hasn't switched to stream-reading yet); errors mid-stream are
+  // sent as an SSE error event then the connection closes.
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no", // hint for proxies (Cloudflare etc.) not to buffer
+  })
+
+  const writeEvent = (obj: unknown) => {
+    res.write(`data: ${JSON.stringify(obj)}\n\n`)
+  }
+
   try {
-    const result = await serverAsk(persona, question, history, quote)
-    send(res, 200, result)
+    for await (const ev of serverAskStream(persona, question, history, quote)) {
+      if (ev.delta) writeEvent({ type: "delta", text: ev.delta })
+      else if (ev.done !== undefined) writeEvent({ type: "done", answer: ev.done })
+    }
   } catch (err) {
-    console.error("[ask] error:", err)
-    send(res, 502, { error: err instanceof Error ? err.message : "Answer failed" })
+    console.error("[ask] stream error:", err)
+    writeEvent({ type: "error", error: err instanceof Error ? err.message : "Answer failed" })
+  } finally {
+    res.end()
   }
 }
 

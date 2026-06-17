@@ -53,17 +53,18 @@ export async function suggest(
 }
 
 /**
- * Ask a language question and get a markdown explanation. Sees the full
- * conversation history (translations + notes, last 20) so follow-ups chain.
- * `quote` optionally anchors the question to a specific translation (set when
- * the user enters Ask mode via the quote icon on a bubble).
+ * Ask a language question and stream the markdown explanation as it arrives.
+ * Sees the full conversation history (translations + notes, last 20) so
+ * follow-ups chain. `quote` optionally anchors the question to a specific
+ * translation (set when the user enters Ask mode via the quote icon on a
+ * bubble). Yields the same event shape as askViaApi ({ delta }, { done },
+ * { error }) so the component can render the answer growing live.
  */
-export async function ask(
+export function ask(
   persona: Persona,
   question: string,
   history: Message[] = [],
   quote?: { original: string; translation: string },
-): Promise<string> {
-  const { answer } = await askViaApi(persona, question, history, quote)
-  return answer
+): AsyncGenerator<{ delta?: string; done?: string; error?: string }> {
+  return askViaApi(persona, question, history, quote)
 }

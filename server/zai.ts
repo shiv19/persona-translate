@@ -668,14 +668,10 @@ export async function serverAsk(
 ): Promise<AskOutput> {
   const recentHistory = history.slice(-ASK_HISTORY_WINDOW)
 
-  const userContent = quote
-    ? `The learner is asking about this specific translation:\n\n> ${persona.sourceLanguage}: ${quote.original}\n> ${persona.targetLanguage}: ${quote.translation}\n\nTheir question: ${question}`
-    : question
-
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildAskPrompt(persona) },
     ...buildAskHistory(persona, recentHistory),
-    { role: "user", content: userContent },
+    { role: "user", content: buildAskUserContent(persona, question, quote) },
   ]
 
   const response = await withRetry(() =>
@@ -692,3 +688,64 @@ export async function serverAsk(
   const answer = response.choices[0]?.message?.content ?? ""
   return { answer: answer.trim() }
 }
+
+/** Build the user-turn content for an ask request (shared by stream/non-stream). */
+function buildAskUserContent(
+  persona: Persona,
+  question: string,
+  quote?: { original: string; translation: string },
+): string {
+  return quote
+    ? `The learner is asking about this specific translation:\n\n> ${persona.sourceLanguage}: ${quote.original}\n> ${persona.targetLanguage}: ${quote.translation}\n\nTheir question: ${question}`
+    : question
+}
+
+/**
+ * Streaming variant of serverAsk. Yields answer text incrementally so the
+ * client can render the markdown explanation as it arrives — ask answers are
+ * often long (tables, lists, multi-paragraph explanations) and waiting for
+ * the full response feels laggy.
+ *
+ * Yields `{ delta }` for each text fragment, then a final `{ done }` carrying
+ * the complete answer. The caller (the SSE route) translates these into SSE
+ * events. Errors propagate as normal exceptions — the route catches and emits
+ * an error event.
+ *
+ * Note: streaming bypasses withRetry — a mid-stream failure isn't retryable
+ * (we'd have to discard partial output the user already saw). Z.ai stream
+ * connections are generally stable; if this proves flaky, the fix is a
+ * higher-level "retry the whole request" at the client, not partial recovery.
+ */
+export async function* serverAskStream(
+  persona: Persona,
+  question: string,
+  history: Message[] = [],
+  quote?: { original: string; translation: string },
+): AsyncGenerator<{ delta?: string; done?: string }> {
+  const recentHistory = history.slice(-ASK_HISTORY_WINDOW)
+
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: "system", content: buildAskPrompt(persona) },
+    ...buildAskHistory(persona, recentHistory),
+    { role: "user", content: buildAskUserContent(persona, question, quote) },
+  ]
+
+  const stream = await client().chat.completions.create({
+    model: MODEL,
+    messages,
+    temperature: 0.5,
+    stream: true,
+    ...({ thinking: { type: "disabled" } } as object),
+  })
+
+  let full = ""
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content ?? ""
+    if (delta) {
+      full += delta
+      yield { delta }
+    }
+  }
+  yield { done: full.trim() }
+}
+
