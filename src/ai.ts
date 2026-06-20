@@ -15,6 +15,11 @@ export const SUGGEST_BATCH = 3
 
 export interface TranslateOutput {
   translation: string
+  // Fields are optional here even though server/zai.ts parses them as required,
+  // because the server's lenient fallback path can return a translation with no
+  // debug fields populated (see parseTranslation). The client treats them as
+  // optional so it renders gracefully in that case. Structurally compatible with
+  // the server's TranslateOutput (required → optional is a safe widening).
   debug: TranslationDebug | null
 }
 

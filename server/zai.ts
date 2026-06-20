@@ -1,26 +1,10 @@
 import OpenAI from "openai"
 import { z } from "zod"
 import { withRetry } from "./retry.js"
-
-// Server-only: the API key lives in process.env and is NEVER sent to the browser.
-const BASE_URL = process.env.ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4"
-const IS_ZAI = BASE_URL.includes("z.ai")
+import { createClient, THINKING_DISABLED, firstFunctionToolCall } from "./glm.js"
 
 const MODEL = process.env.ZAI_MODEL || "glm-5.1"
 export const MAX_HISTORY = 5
-
-// Lazily construct the OpenAI client so a missing ZAI_API_KEY doesn't crash
-// the process on boot — it only fails if a request actually needs the key.
-let _client: OpenAI | null = null
-function client(): OpenAI {
-  if (!_client) {
-    if (!process.env.ZAI_API_KEY) {
-      throw new Error("Server is missing ZAI_API_KEY")
-    }
-    _client = new OpenAI({ apiKey: process.env.ZAI_API_KEY, baseURL: BASE_URL })
-  }
-  return _client
-}
 
 // ---------------------------------------------------------------------------
 // Shared types — mirrored from src/types.ts. The server cannot import client
@@ -282,7 +266,7 @@ export async function serverTranslate(
   ]
 
   const response = await withRetry(() =>
-    client().chat.completions.create({
+    createClient().chat.completions.create({
       model: MODEL,
       messages,
       temperature: 0.3,
@@ -290,17 +274,15 @@ export async function serverTranslate(
       // Z.ai only supports "auto", but with exactly one tool defined and the
       // system prompt instructing the model to call it, GLM reliably invokes it.
       tool_choice: "auto",
-      // Z.ai-specific: disable GLM-5.1 reasoning/thinking tokens for speed.
-      ...({ thinking: { type: "disabled" } } as object),
+      ...THINKING_DISABLED,
     }),
   )
 
   const message = response.choices[0]?.message
 
   // Primary path: parse the tool call arguments (schema-enforced).
-  // Narrow to the function-tool variant — the union also has a "custom" variant.
-  const toolCall = message?.tool_calls?.[0]
-  if (toolCall && toolCall.type === "function" && "function" in toolCall) {
+  const toolCall = firstFunctionToolCall(message)
+  if (toolCall) {
     const parsed = parseToolArguments(toolCall.function.arguments)
     if (parsed) {
       const { translation, ...debug } = parsed
@@ -545,7 +527,7 @@ export async function serverSuggest(
   ]
 
   const response = await withRetry(() =>
-    client().chat.completions.create({
+    createClient().chat.completions.create({
       model: MODEL,
       messages,
       // Slightly higher than translate's 0.3 — we want variety across batches
@@ -553,15 +535,15 @@ export async function serverSuggest(
       temperature: 0.6,
       tools: [SUGGEST_TOOL],
       tool_choice: "auto",
-      ...({ thinking: { type: "disabled" } } as object),
+      ...THINKING_DISABLED,
     }),
   )
 
   const message = response.choices[0]?.message
 
   // Primary path: parse the tool call arguments (schema-enforced array).
-  const toolCall = message?.tool_calls?.[0]
-  if (toolCall && toolCall.type === "function" && "function" in toolCall) {
+  const toolCall = firstFunctionToolCall(message)
+  if (toolCall) {
     const parsed = parseSuggestArguments(toolCall.function.arguments)
     if (parsed) return { suggestions: parsed }
   }
@@ -650,46 +632,7 @@ GUIDELINES:
 6. BE CONCISE BUT COMPLETE. Answer the actual question fully, but don't pad. A focused paragraph or a tight table beats a wall of text. Skip preambles like "Great question!" — just answer.`
 }
 
-export interface AskOutput {
-  answer: string
-}
-
-/**
- * Answer a language question with a markdown explanation. Sees the full
- * conversation (translations + notes, last 20) so follow-ups chain. If `quote`
- * is provided, it's injected as explicit context — the answer should ground in
- * that specific translation. No tool-call schema; returns raw markdown content.
- */
-export async function serverAsk(
-  persona: Persona,
-  question: string,
-  history: Message[] = [],
-  quote?: { original: string; translation: string },
-): Promise<AskOutput> {
-  const recentHistory = history.slice(-ASK_HISTORY_WINDOW)
-
-  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: buildAskPrompt(persona) },
-    ...buildAskHistory(persona, recentHistory),
-    { role: "user", content: buildAskUserContent(persona, question, quote) },
-  ]
-
-  const response = await withRetry(() =>
-    client().chat.completions.create({
-      model: MODEL,
-      messages,
-      // Between translate's 0.3 (fidelity) and suggest's 0.6 (variety) —
-      // explanations want some thoughtfulness but not invention.
-      temperature: 0.5,
-      ...({ thinking: { type: "disabled" } } as object),
-    }),
-  )
-
-  const answer = response.choices[0]?.message?.content ?? ""
-  return { answer: answer.trim() }
-}
-
-/** Build the user-turn content for an ask request (shared by stream/non-stream). */
+/** Build the user-turn content for an ask request. */
 function buildAskUserContent(
   persona: Persona,
   question: string,
@@ -701,10 +644,9 @@ function buildAskUserContent(
 }
 
 /**
- * Streaming variant of serverAsk. Yields answer text incrementally so the
- * client can render the markdown explanation as it arrives — ask answers are
- * often long (tables, lists, multi-paragraph explanations) and waiting for
- * the full response feels laggy.
+ * Stream an ask answer incrementally so the client can render the markdown
+ * explanation as it arrives — ask answers are often long (tables, lists,
+ * multi-paragraph explanations) and waiting for the full response feels laggy.
  *
  * Yields `{ delta }` for each text fragment, then a final `{ done }` carrying
  * the complete answer. The caller (the SSE route) translates these into SSE
@@ -730,12 +672,12 @@ export async function* serverAskStream(
     { role: "user", content: buildAskUserContent(persona, question, quote) },
   ]
 
-  const stream = await client().chat.completions.create({
+  const stream = await createClient().chat.completions.create({
     model: MODEL,
     messages,
     temperature: 0.5,
     stream: true,
-    ...({ thinking: { type: "disabled" } } as object),
+    ...THINKING_DISABLED,
   })
 
   let full = ""

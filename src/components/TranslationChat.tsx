@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect } from "react"
 import type { Persona, Message, Suggestion } from "../types"
 import { uid } from "../types"
 import { translate, suggest, ask, MAX_HISTORY, SUGGEST_BATCH } from "../ai"
@@ -12,9 +12,11 @@ import {
   loadSeenPhrases,
   addSeenPhrase,
 } from "../storage"
-import { resolveLangCode } from "../tts"
+import { useSpeech } from "../hooks/useSpeech"
 import { Markdown } from "./Markdown"
-import { ArrowLeft, Volume2, VolumeX, Copy, Check, SendHorizontal, ArrowRightLeft, X, Repeat, Star, Sparkles, Plus, History, MessageCircleQuestion, Quote } from "lucide-react"
+import { BubbleActions } from "./BubbleActions"
+import { DebugDetails } from "./DebugDetails"
+import { ArrowLeft, SendHorizontal, ArrowRightLeft, X, Repeat, Star, Sparkles, Plus, History, MessageCircleQuestion, Quote, Copy, Check } from "lucide-react"
 
 interface Props {
   persona: Persona
@@ -63,8 +65,6 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
   // "translate" → "You said" + translation typing; "ask" → "You asked" + answer typing.
   const [loadingMode, setLoadingMode] = useState<"translate" | "ask">("translate")
   const [error, setError] = useState<string | null>(null)
-  const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [playingId, setPlayingId] = useState<string | null>(null)
   const [pendingText, setPendingText] = useState<string | null>(null)
   const [direction, setDirection] = useState<"to-target" | "from-target">("to-target")
   // Suggest mode: when armed, the textarea becomes a situation field and the
@@ -78,61 +78,9 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
   // — it anchors the question to that specific translation.
   const [askMode, setAskMode] = useState(false)
   const [quote, setQuote] = useState<{ original: string; translation: string } | null>(null)
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(() =>
-    typeof window !== "undefined" ? window.speechSynthesis.getVoices() : [],
-  )
+  const speech = useSpeech()
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-
-  const stopSpeech = useCallback(() => {
-    window.speechSynthesis.cancel()
-    setPlayingId(null)
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      window.speechSynthesis.cancel()
-    }
-  }, [])
-
-  // getVoices() returns [] until the synth finishes loading. Listen for the
-  // voiceschanged event so voice matching works on first render after load.
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return
-    const sync = () => setVoices(window.speechSynthesis.getVoices())
-    sync()
-    window.speechSynthesis.addEventListener("voiceschanged", sync)
-    return () => window.speechSynthesis.removeEventListener("voiceschanged", sync)
-  }, [])
-
-  function handleSpeak(text: string, messageId: string, msgDirection: "to-target" | "from-target") {
-    if (playingId === messageId) {
-      stopSpeech()
-      return
-    }
-
-    stopSpeech()
-
-    const utterance = new SpeechSynthesisUtterance(text)
-    const ttsLang = msgDirection === "to-target" ? persona.targetLanguage : persona.sourceLanguage
-    const langCode = resolveLangCode(ttsLang)
-
-    // Prefer an actually-installed voice for this language. Fall back to the
-    // synth default only if we mapped a real BCP-47 tag; never hand it a
-    // garbage string that the synth will reject.
-    if (langCode) {
-      utterance.lang = langCode
-      const match = voices.find((v) => v.lang.startsWith(langCode.split("-")[0]))
-      if (match) utterance.voice = match
-    }
-
-    utterance.rate = 0.9
-    utterance.onend = () => setPlayingId(null)
-    utterance.onerror = () => setPlayingId(null)
-
-    setPlayingId(messageId)
-    window.speechSynthesis.speak(utterance)
-  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -427,12 +375,6 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
     }
   }
 
-  function handleCopy(text: string, id: string) {
-    navigator.clipboard.writeText(text)
-    setCopiedId(id)
-    setTimeout(() => setCopiedId(null), 1500)
-  }
-
   function handleToggleFavorite(msg: Message) {
     const key = `${msg.original}::${msg.translation}`
     if (favoritedKeys.has(key)) {
@@ -536,11 +478,11 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
                   <span className="bubble-actions">
                     <button
                       className="btn btn-ghost btn-sm"
-                      onClick={() => handleCopy(msg.translation, msg.id)}
+                      onClick={() => speech.copy(msg.translation, msg.id)}
                       title="Copy answer"
-                      aria-label={copiedId === msg.id ? "Copied" : "Copy answer"}
+                      aria-label={speech.isCopied(msg.id) ? "Copied" : "Copy answer"}
                     >
-                      {copiedId === msg.id ? <Check size={14} /> : <Copy size={14} />}
+                      {speech.isCopied(msg.id) ? <Check size={14} /> : <Copy size={14} />}
                     </button>
                     <button
                       className="btn btn-ghost btn-sm btn-danger"
@@ -569,23 +511,13 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
                 <div className="chat-bubble-label">
                   {msg.direction === "to-target" ? "You said" : `${persona.name} said`}
                   <span className="bubble-actions">
-                    <button
-                      className={`btn btn-ghost btn-sm btn-speak ${playingId === `orig-${msg.id}` ? "speaking" : ""}`}
-                      onClick={() => handleSpeak(msg.original, `orig-${msg.id}`, msg.direction === "to-target" ? "from-target" : "to-target")}
-                      title={playingId === `orig-${msg.id}` ? "Stop" : "Play aloud"}
-                      aria-label={playingId === `orig-${msg.id}` ? "Stop playback" : "Play original aloud"}
-                      aria-pressed={playingId === `orig-${msg.id}`}
-                    >
-                      {playingId === `orig-${msg.id}` ? <VolumeX size={16} /> : <Volume2 size={16} />}
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => handleCopy(msg.original, `orig-${msg.id}`)}
-                      title="Copy"
-                      aria-label={copiedId === `orig-${msg.id}` ? "Copied" : "Copy original"}
-                    >
-                      {copiedId === `orig-${msg.id}` ? <Check size={16} /> : <Copy size={16} />}
-                    </button>
+                    <BubbleActions
+                      text={msg.original}
+                      id={`orig-${msg.id}`}
+                      language={msg.direction === "to-target" ? persona.sourceLanguage : persona.targetLanguage}
+                      label="original"
+                      speech={speech}
+                    />
                   </span>
                 </div>
                 <div className="chat-bubble-text">{msg.original}</div>
@@ -594,23 +526,13 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
                 <div className="chat-bubble-label">
                   Translation
                   <span className="bubble-actions">
-                    <button
-                      className={`btn btn-ghost btn-sm btn-speak ${playingId === msg.id ? "speaking" : ""}`}
-                      onClick={() => handleSpeak(msg.translation, msg.id, msg.direction)}
-                      title={playingId === msg.id ? "Stop" : "Play aloud"}
-                      aria-label={playingId === msg.id ? "Stop playback" : "Play translation aloud"}
-                      aria-pressed={playingId === msg.id}
-                    >
-                      {playingId === msg.id ? <VolumeX size={16} /> : <Volume2 size={16} />}
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => handleCopy(msg.translation, msg.id)}
-                      title="Copy"
-                      aria-label={copiedId === msg.id ? "Copied" : "Copy translation"}
-                    >
-                      {copiedId === msg.id ? <Check size={16} /> : <Copy size={16} />}
-                    </button>
+                    <BubbleActions
+                      text={msg.translation}
+                      id={msg.id}
+                      language={msg.direction === "to-target" ? persona.targetLanguage : persona.sourceLanguage}
+                      label="translation"
+                      speech={speech}
+                    />
                     {/* Quote/Ask — enter Ask mode anchored to this translation */}
                     <button
                       className="btn btn-ghost btn-sm"
@@ -640,21 +562,7 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
                   </span>
                 </div>
                 <div className="chat-bubble-text">{msg.translation}</div>
-                {msg.debug && (
-                  <details className="debug-details">
-                    <summary>Breakdown</summary>
-                    <dl className="debug-grid">
-                      <dt>Speaker</dt>
-                      <dd>{msg.debug.speaker}</dd>
-                      <dt>Register</dt>
-                      <dd>{msg.debug.register}</dd>
-                      <dt>Honorifics</dt>
-                      <dd>{msg.debug.honorificsUsed}</dd>
-                      <dt>Referents</dt>
-                      <dd>{msg.debug.referents}</dd>
-                    </dl>
-                  </details>
-                )}
+                <DebugDetails debug={msg.debug} summary="Breakdown" />
               </div>
             </div>
           ),
@@ -762,23 +670,14 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
                           <span className="suggestion-item-lang"> · {persona.sourceLanguage}</span>
                         </span>
                         <span className="bubble-actions">
-                          <button
-                            className={`btn btn-ghost btn-sm btn-speak ${playingId === `sg-orig-${item.id}` ? "speaking" : ""}`}
-                            onClick={() => handleSpeak(item.original, `sg-orig-${item.id}`, "from-target")}
-                            title={playingId === `sg-orig-${item.id}` ? "Stop" : "Play aloud"}
-                            aria-label={playingId === `sg-orig-${item.id}` ? "Stop playback" : "Play original aloud"}
-                            aria-pressed={playingId === `sg-orig-${item.id}`}
-                          >
-                            {playingId === `sg-orig-${item.id}` ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                          </button>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => handleCopy(item.original, `sg-orig-${item.id}`)}
-                            title="Copy"
-                            aria-label={copiedId === `sg-orig-${item.id}` ? "Copied" : "Copy original"}
-                          >
-                            {copiedId === `sg-orig-${item.id}` ? <Check size={14} /> : <Copy size={14} />}
-                          </button>
+                          <BubbleActions
+                            text={item.original}
+                            id={`sg-orig-${item.id}`}
+                            language={persona.sourceLanguage}
+                            label="original"
+                            size={14}
+                            speech={speech}
+                          />
                         </span>
                       </div>
                       {item.original}
@@ -790,23 +689,14 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
                           <span className="suggestion-item-lang"> · {persona.targetLanguage}</span>
                         </span>
                         <span className="bubble-actions">
-                          <button
-                            className={`btn btn-ghost btn-sm btn-speak ${playingId === `sg-tr-${item.id}` ? "speaking" : ""}`}
-                            onClick={() => handleSpeak(item.translation, `sg-tr-${item.id}`, "to-target")}
-                            title={playingId === `sg-tr-${item.id}` ? "Stop" : "Play aloud"}
-                            aria-label={playingId === `sg-tr-${item.id}` ? "Stop playback" : "Play translation aloud"}
-                            aria-pressed={playingId === `sg-tr-${item.id}`}
-                          >
-                            {playingId === `sg-tr-${item.id}` ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                          </button>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => handleCopy(item.translation, `sg-tr-${item.id}`)}
-                            title="Copy"
-                            aria-label={copiedId === `sg-tr-${item.id}` ? "Copied" : "Copy translation"}
-                          >
-                            {copiedId === `sg-tr-${item.id}` ? <Check size={14} /> : <Copy size={14} />}
-                          </button>
+                          <BubbleActions
+                            text={item.translation}
+                            id={`sg-tr-${item.id}`}
+                            language={persona.targetLanguage}
+                            label="translation"
+                            size={14}
+                            speech={speech}
+                          />
                         </span>
                       </div>
                       {item.translation}
