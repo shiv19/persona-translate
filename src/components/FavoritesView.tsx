@@ -1,8 +1,10 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from "react"
+import { useState, useMemo, useRef, useCallback } from "react"
 import type { Persona, Favorite } from "../types"
 import { loadFavorites, updateFavorite, removeFavorite, saveFavorite } from "../storage"
-import { resolveLangCode } from "../tts"
-import { ArrowLeft, Search, X, Tag, StickyNote, Volume2, VolumeX, Copy, Check } from "lucide-react"
+import { useSpeech } from "../hooks/useSpeech"
+import { BubbleActions } from "./BubbleActions"
+import { DebugDetails } from "./DebugDetails"
+import { ArrowLeft, Search, X, Tag, StickyNote } from "lucide-react"
 
 interface Props {
   persona: Persona
@@ -19,18 +21,8 @@ export function FavoritesView({ persona, onBack }: Props) {
   const [editNotes, setEditNotes] = useState("")
   const [editTags, setEditTags] = useState("")
   const [pendingDelete, setPendingDelete] = useState<Favorite | null>(null)
-  const [playingId, setPlayingId] = useState<string | null>(null)
-  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const speech = useSpeech()
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const stopSpeech = useCallback(() => {
-    window.speechSynthesis.cancel()
-    setPlayingId(null)
-  }, [])
-
-  useEffect(() => {
-    return () => { window.speechSynthesis.cancel() }
-  }, [])
 
   const allTags = useMemo(() => {
     const tagSet = new Set<string>()
@@ -112,33 +104,6 @@ export function FavoritesView({ persona, onBack }: Props) {
       current.push(tag)
       setEditTags(current.join(", "))
     }
-  }
-
-  function handleSpeak(text: string, id: string, direction: "to-target" | "from-target") {
-    if (playingId === id) {
-      stopSpeech()
-      return
-    }
-    stopSpeech()
-    const utterance = new SpeechSynthesisUtterance(text)
-    const lang = direction === "to-target" ? persona.targetLanguage : persona.sourceLanguage
-    const langCode = resolveLangCode(lang)
-    if (langCode) {
-      utterance.lang = langCode
-      const match = window.speechSynthesis.getVoices().find((v) => v.lang.startsWith(langCode.split("-")[0]))
-      if (match) utterance.voice = match
-    }
-    utterance.rate = 0.9
-    utterance.onend = () => setPlayingId(null)
-    utterance.onerror = () => setPlayingId(null)
-    setPlayingId(id)
-    window.speechSynthesis.speak(utterance)
-  }
-
-  function handleCopy(text: string, id: string) {
-    navigator.clipboard.writeText(text)
-    setCopiedId(id)
-    setTimeout(() => setCopiedId(null), 1500)
   }
 
   return (
@@ -231,23 +196,14 @@ export function FavoritesView({ persona, onBack }: Props) {
                       {fav.direction === "to-target" ? "Original" : persona.name}
                     </span>
                     <span className="bubble-actions">
-                      <button
-                        className={`btn btn-ghost btn-sm btn-speak ${playingId === `orig-${fav.id}` ? "speaking" : ""}`}
-                        onClick={() => handleSpeak(fav.original, `orig-${fav.id}`, fav.direction === "to-target" ? "from-target" : "to-target")}
-                        title={playingId === `orig-${fav.id}` ? "Stop" : "Play aloud"}
-                        aria-label={playingId === `orig-${fav.id}` ? "Stop playback" : "Play original aloud"}
-                        aria-pressed={playingId === `orig-${fav.id}`}
-                      >
-                        {playingId === `orig-${fav.id}` ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => handleCopy(fav.original, `orig-${fav.id}`)}
-                        title="Copy"
-                        aria-label={copiedId === `orig-${fav.id}` ? "Copied" : "Copy original"}
-                      >
-                        {copiedId === `orig-${fav.id}` ? <Check size={14} /> : <Copy size={14} />}
-                      </button>
+                      <BubbleActions
+                        text={fav.original}
+                        id={`orig-${fav.id}`}
+                        language={fav.direction === "to-target" ? persona.sourceLanguage : persona.targetLanguage}
+                        label="original"
+                        size={14}
+                        speech={speech}
+                      />
                     </span>
                   </div>
                   {fav.original}
@@ -256,42 +212,19 @@ export function FavoritesView({ persona, onBack }: Props) {
                   <div className="favorite-card-label-row">
                     <span className="favorite-card-label">Translation</span>
                     <span className="bubble-actions">
-                      <button
-                        className={`btn btn-ghost btn-sm btn-speak ${playingId === fav.id ? "speaking" : ""}`}
-                        onClick={() => handleSpeak(fav.translation, fav.id, fav.direction)}
-                        title={playingId === fav.id ? "Stop" : "Play aloud"}
-                        aria-label={playingId === fav.id ? "Stop playback" : "Play translation aloud"}
-                        aria-pressed={playingId === fav.id}
-                      >
-                        {playingId === fav.id ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => handleCopy(fav.translation, fav.id)}
-                        title="Copy"
-                        aria-label={copiedId === fav.id ? "Copied" : "Copy translation"}
-                      >
-                        {copiedId === fav.id ? <Check size={14} /> : <Copy size={14} />}
-                      </button>
+                      <BubbleActions
+                        text={fav.translation}
+                        id={fav.id}
+                        language={fav.direction === "to-target" ? persona.targetLanguage : persona.sourceLanguage}
+                        label="translation"
+                        size={14}
+                        speech={speech}
+                      />
                     </span>
                   </div>
                   {fav.translation}
                 </div>
-                {fav.debug && (
-                  <details className="debug-details">
-                    <summary>Grammar</summary>
-                    <dl className="debug-grid">
-                      <dt>Speaker</dt>
-                      <dd>{fav.debug.speaker}</dd>
-                      <dt>Register</dt>
-                      <dd>{fav.debug.register}</dd>
-                      <dt>Honorifics</dt>
-                      <dd>{fav.debug.honorificsUsed}</dd>
-                      <dt>Referents</dt>
-                      <dd>{fav.debug.referents}</dd>
-                    </dl>
-                  </details>
-                )}
+                <DebugDetails debug={fav.debug} summary="Grammar" />
                 {fav.tags && fav.tags.length > 0 && editingId !== fav.id && (
                   <div className="favorite-card-tags">
                     {fav.tags.map((tag) => (

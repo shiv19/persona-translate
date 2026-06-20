@@ -1,20 +1,43 @@
 import type { Persona, Message, Favorite, Conversation } from "./types"
 import { uid } from "./types"
 
-const PERSONAS_KEY = "pt_personas"
-const MESSAGES_KEY = "pt_messages"
+// ---------------------------------------------------------------------------
+// localStorage round-trip helpers.
+//
+// The whole store is a set of flat arrays, one per key, filtered by personaId
+// (and conversationId for messages) at read time. `readStore` is the safe
+// loader (corrupt JSON → []); `readStoreRaw`/`writeStore` are used by mutation
+// paths that want to surface a corrupt-store error rather than silently reset.
+// ---------------------------------------------------------------------------
 
-export function loadPersonas(): Persona[] {
+function readStore<T>(key: string): T[] {
   try {
-    const raw = localStorage.getItem(PERSONAS_KEY)
-    return raw ? JSON.parse(raw) : []
+    const raw = localStorage.getItem(key)
+    return raw ? (JSON.parse(raw) as T[]) : []
   } catch {
     return []
   }
 }
 
+/** Read without the try/catch — surfaces corrupt JSON. Used by mutations. */
+function readStoreRaw<T>(key: string): T[] {
+  const raw = localStorage.getItem(key)
+  return raw ? (JSON.parse(raw) as T[]) : []
+}
+
+function writeStore<T>(key: string, value: T[]): void {
+  localStorage.setItem(key, JSON.stringify(value))
+}
+
+const PERSONAS_KEY = "pt_personas"
+const MESSAGES_KEY = "pt_messages"
+
+export function loadPersonas(): Persona[] {
+  return readStore<Persona>(PERSONAS_KEY)
+}
+
 export function savePersonas(personas: Persona[]): void {
-  localStorage.setItem(PERSONAS_KEY, JSON.stringify(personas))
+  writeStore(PERSONAS_KEY, personas)
 }
 
 /**
@@ -25,35 +48,22 @@ export function savePersonas(personas: Persona[]): void {
  *   bucket. Callers that know the active conversation pass it explicitly.
  */
 export function loadMessages(personaId: string, conversationId?: string): Message[] {
-  try {
-    const raw = localStorage.getItem(MESSAGES_KEY)
-    const all: Message[] = raw ? JSON.parse(raw) : []
-    return all.filter((m) => {
-      if (m.personaId !== personaId) return false
-      if (conversationId === undefined) return m.conversationId === undefined
-      return m.conversationId === conversationId
-    })
-  } catch {
-    return []
-  }
+  return readStore<Message>(MESSAGES_KEY).filter((m) => {
+    if (m.personaId !== personaId) return false
+    if (conversationId === undefined) return m.conversationId === undefined
+    return m.conversationId === conversationId
+  })
 }
 
 /** Load all messages for a conversation across the flat store. */
 export function loadConversationMessages(conversationId: string): Message[] {
-  try {
-    const raw = localStorage.getItem(MESSAGES_KEY)
-    const all: Message[] = raw ? JSON.parse(raw) : []
-    return all.filter((m) => m.conversationId === conversationId)
-  } catch {
-    return []
-  }
+  return readStore<Message>(MESSAGES_KEY).filter((m) => m.conversationId === conversationId)
 }
 
 export function saveMessage(message: Message): void {
-  const raw = localStorage.getItem(MESSAGES_KEY)
-  const all: Message[] = raw ? JSON.parse(raw) : []
+  const all = readStoreRaw<Message>(MESSAGES_KEY)
   all.push(message)
-  localStorage.setItem(MESSAGES_KEY, JSON.stringify(all))
+  writeStore(MESSAGES_KEY, all)
   // Keep the conversation's updatedAt in sync so recency sort is accurate.
   if (message.conversationId) touchConversation(message.conversationId)
 }
@@ -62,9 +72,8 @@ export function saveMessage(message: Message): void {
  * Clear messages. With a conversationId, clears only that conversation's
  * messages. Without, clears ALL messages for the persona (used by deletePersona).
  */
-export function clearMessages(personaId: string, conversationId?: string): void {
-  const raw = localStorage.getItem(MESSAGES_KEY)
-  const all: Message[] = raw ? JSON.parse(raw) : []
+function clearMessages(personaId: string, conversationId?: string): void {
+  const all = readStoreRaw<Message>(MESSAGES_KEY)
   const filtered = all.filter((m) => {
     if (conversationId !== undefined) {
       // Remove only this conversation's messages
@@ -72,19 +81,18 @@ export function clearMessages(personaId: string, conversationId?: string): void 
     }
     return m.personaId !== personaId
   })
-  localStorage.setItem(MESSAGES_KEY, JSON.stringify(filtered))
+  writeStore(MESSAGES_KEY, filtered)
 }
 
 export function deleteMessage(messageId: string): void {
-  const raw = localStorage.getItem(MESSAGES_KEY)
-  const all: Message[] = raw ? JSON.parse(raw) : []
-  const filtered = all.filter((m) => m.id !== messageId)
-  localStorage.setItem(MESSAGES_KEY, JSON.stringify(filtered))
+  writeStore(
+    MESSAGES_KEY,
+    readStoreRaw<Message>(MESSAGES_KEY).filter((m) => m.id !== messageId),
+  )
 }
 
 export function deletePersona(personaId: string): void {
-  const personas = loadPersonas().filter((p) => p.id !== personaId)
-  savePersonas(personas)
+  savePersonas(loadPersonas().filter((p) => p.id !== personaId))
   clearMessages(personaId)
   clearFavorites(personaId)
   clearSeenPhrases(personaId)
@@ -94,16 +102,11 @@ export function deletePersona(personaId: string): void {
 const FAVORITES_KEY = "pt_favorites"
 
 function loadAllFavorites(): Favorite[] {
-  try {
-    const raw = localStorage.getItem(FAVORITES_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
+  return readStore<Favorite>(FAVORITES_KEY)
 }
 
 function saveAllFavorites(favs: Favorite[]): void {
-  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs))
+  writeStore(FAVORITES_KEY, favs)
 }
 
 export function loadFavorites(personaId: string): Favorite[] {
@@ -123,14 +126,12 @@ export function saveFavorite(fav: Favorite): void {
 }
 
 export function removeFavorite(favoriteId: string): void {
-  const all = loadAllFavorites()
-  saveAllFavorites(all.filter((f) => f.id !== favoriteId))
+  saveAllFavorites(loadAllFavorites().filter((f) => f.id !== favoriteId))
 }
 
 export function removeFavoriteByContent(original: string, translation: string): void {
-  const all = loadAllFavorites()
   saveAllFavorites(
-    all.filter((f) => !(f.original === original && f.translation === translation)),
+    loadAllFavorites().filter((f) => !(f.original === original && f.translation === translation)),
   )
 }
 
@@ -167,16 +168,11 @@ interface SeenPhraseRecord {
 }
 
 function loadAllSeen(): SeenPhraseRecord[] {
-  try {
-    const raw = localStorage.getItem(SEEN_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
+  return readStore<SeenPhraseRecord>(SEEN_KEY)
 }
 
 function saveAllSeen(all: SeenPhraseRecord[]): void {
-  localStorage.setItem(SEEN_KEY, JSON.stringify(all))
+  writeStore(SEEN_KEY, all)
 }
 
 export function loadSeenPhrases(personaId: string): string[] {
@@ -216,16 +212,11 @@ export function clearSeenPhrases(personaId: string): void {
 const CONVERSATIONS_KEY = "pt_conversations"
 
 function loadAllConversations(): Conversation[] {
-  try {
-    const raw = localStorage.getItem(CONVERSATIONS_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
+  return readStore<Conversation>(CONVERSATIONS_KEY)
 }
 
 function saveAllConversations(all: Conversation[]): void {
-  localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(all))
+  writeStore(CONVERSATIONS_KEY, all)
 }
 
 /** Conversations for a persona, sorted pinned-first then by updatedAt desc. */
@@ -270,7 +261,7 @@ export function toggleConversationPin(id: string): void {
 }
 
 /** Bump a conversation's updatedAt (called from saveMessage). No-op if missing. */
-export function touchConversation(id: string): void {
+function touchConversation(id: string): void {
   const all = loadAllConversations()
   const conv = all.find((c) => c.id === id)
   if (conv) {
@@ -288,11 +279,9 @@ export function deleteConversation(id: string): Message[] {
   // Remove the conversation record
   saveAllConversations(loadAllConversations().filter((c) => c.id !== id))
   // Remove its messages
-  const raw = localStorage.getItem(MESSAGES_KEY)
-  const all: Message[] = raw ? JSON.parse(raw) : []
-  localStorage.setItem(
+  writeStore(
     MESSAGES_KEY,
-    JSON.stringify(all.filter((m) => m.conversationId !== id)),
+    readStoreRaw<Message>(MESSAGES_KEY).filter((m) => m.conversationId !== id),
   )
   return deletedMessages
 }
@@ -301,9 +290,7 @@ export function deleteConversation(id: string): Message[] {
 export function restoreConversation(conv: Conversation, messages: Message[]): void {
   saveConversation(conv)
   if (messages.length > 0) {
-    const raw = localStorage.getItem(MESSAGES_KEY)
-    const all: Message[] = raw ? JSON.parse(raw) : []
-    localStorage.setItem(MESSAGES_KEY, JSON.stringify([...all, ...messages]))
+    writeStore(MESSAGES_KEY, [...readStoreRaw<Message>(MESSAGES_KEY), ...messages])
   }
 }
 

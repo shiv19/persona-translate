@@ -1,22 +1,19 @@
-import OpenAI from "openai"
 import type { Persona } from "../server/zai.js"
 import { withRetry } from "../server/retry.js"
+import {
+  createClient,
+  THINKING_DISABLED,
+  firstFunctionToolCall,
+} from "../server/glm.js"
 
 // The judge uses the same Z.ai endpoint + key as the translator under test.
 // This is a known trade-off (a model judging itself may share blind spots),
 // chosen for cost/simplicity. To swap in a stronger judge later, change only
 // this file — test cases stay untouched.
-const BASE_URL = process.env.ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4"
+// MODEL intentionally differs from the translator's: it can be overridden via
+// ZAI_JUDGE_MODEL to use a stronger model as judge while the system under test
+// stays on ZAI_MODEL.
 const MODEL = process.env.ZAI_JUDGE_MODEL || process.env.ZAI_MODEL || "glm-5.1"
-
-let _client: OpenAI | null = null
-function client(): OpenAI {
-  if (!_client) {
-    if (!process.env.ZAI_API_KEY) throw new Error("Judge missing ZAI_API_KEY")
-    _client = new OpenAI({ apiKey: process.env.ZAI_API_KEY, baseURL: BASE_URL })
-  }
-  return _client
-}
 
 // The judge must commit to a structured verdict via a tool call, so we get a
 // clean { score, rationale } back instead of free-form prose.
@@ -102,18 +99,18 @@ EVALUATION PROCEDURE (follow this order exactly):
 Score 1 = rubric satisfied. Score 0.5 = ambiguous/partial. Score 0 = violated. Cite the exact term(s) from the translation in your rationale.`
 
   const response = await withRetry(() =>
-    client().chat.completions.create({
+    createClient().chat.completions.create({
       model: MODEL,
       temperature: 0, // deterministic judging
       messages: [{ role: "user", content: prompt }],
       tools: [SCORE_TOOL],
       tool_choice: "auto",
-      ...({ thinking: { type: "disabled" } } as object),
+      ...THINKING_DISABLED,
     }),
   )
 
-  const toolCall = response.choices[0]?.message?.tool_calls?.[0]
-  if (toolCall && toolCall.type === "function" && "function" in toolCall) {
+  const toolCall = firstFunctionToolCall(response.choices[0]?.message)
+  if (toolCall) {
     try {
       const args = JSON.parse(toolCall.function.arguments) as { score: number; rationale: string }
       return { score: args.score, rationale: args.rationale }

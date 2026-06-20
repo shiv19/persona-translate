@@ -142,6 +142,12 @@ async function serveStatic(res: http.ServerResponse, urlPath: string) {
 
 // ---------------------------------------------------------------------------
 // API handlers
+//
+// Every handler shares the same skeleton: a ZAI_API_KEY guard, a JSON body read
+// (400 on malformed), and field validation (400 on bad input). `jsonHandler`
+// encapsulates that plus the run/JSON-encode/502-on-error tail. `handleAsk`
+// reuses only the prelude (key guard + body read + validate) because its
+// response is an SSE stream, not JSON.
 // ---------------------------------------------------------------------------
 
 interface TranslateRequest {
@@ -167,65 +173,84 @@ interface AskRequest {
   quote?: { original: string; translation: string }
 }
 
-async function handleTranslate(req: http.IncomingMessage, res: http.ServerResponse) {
+interface JsonHandlerOpts<T> {
+  /** Short label for error logging + the generic failure message. */
+  label: string
+  /** Validate the parsed body; return an error string (→ 400) or null if ok. */
+  validate: (body: T) => string | null
+  /** Run the work; its return value is JSON-encoded as the 200 response. */
+  run: (body: T) => Promise<unknown>
+}
+
+/**
+ * JSON request → JSON response handler. Handles the key guard, body parsing,
+ * validation, and the run/error envelope uniformly. On a thrown `run`, logs and
+ * returns 502 with the error message (or a generic "<label> failed").
+ */
+async function jsonHandler<T>(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  opts: JsonHandlerOpts<T>,
+) {
   if (!process.env.ZAI_API_KEY) {
     send(res, 500, { error: "Server missing ZAI_API_KEY" })
     return
   }
 
-  let body: TranslateRequest
+  let body: T
   try {
-    body = await readJsonBody<TranslateRequest>(req)
+    body = await readJsonBody<T>(req)
   } catch {
     send(res, 400, { error: "Invalid JSON body" })
     return
   }
 
-  const { persona, input, history = [], direction = "to-target" } = body
-  if (!persona || typeof input !== "string" || !input.trim()) {
-    send(res, 400, { error: "Missing persona or input" })
+  const validationError = opts.validate(body)
+  if (validationError) {
+    send(res, 400, { error: validationError })
     return
   }
 
   try {
-    const result = await serverTranslate(persona, input, history, direction)
-    send(res, 200, result)
+    send(res, 200, await opts.run(body))
   } catch (err) {
-    console.error("[translate] error:", err)
-    send(res, 502, { error: err instanceof Error ? err.message : "Translation failed" })
+    console.error(`[${opts.label}] error:`, err)
+    send(res, 502, { error: err instanceof Error ? err.message : `${opts.label} failed` })
   }
 }
 
-async function handleSuggest(req: http.IncomingMessage, res: http.ServerResponse) {
-  if (!process.env.ZAI_API_KEY) {
-    send(res, 500, { error: "Server missing ZAI_API_KEY" })
-    return
-  }
+const handleTranslate = (req: http.IncomingMessage, res: http.ServerResponse) =>
+  jsonHandler<TranslateRequest>(req, res, {
+    label: "translate",
+    validate: (b) =>
+      !b.persona || typeof b.input !== "string" || !b.input.trim()
+        ? "Missing persona or input"
+        : null,
+    run: (b) =>
+      serverTranslate(b.persona, b.input, b.history ?? [], b.direction ?? "to-target"),
+  })
 
-  let body: SuggestRequest
-  try {
-    body = await readJsonBody<SuggestRequest>(req)
-  } catch {
-    send(res, 400, { error: "Invalid JSON body" })
-    return
-  }
-
-  const { persona, situation, avoid = [], count = 3, direction = "to-target", history = [] } = body
-  if (!persona || typeof situation !== "string" || !situation.trim()) {
-    send(res, 400, { error: "Missing persona or situation" })
-    return
-  }
-
-  try {
-    const result = await serverSuggest(persona, situation, avoid, count, direction, history)
-    send(res, 200, result)
-  } catch (err) {
-    console.error("[suggest] error:", err)
-    send(res, 502, { error: err instanceof Error ? err.message : "Suggestion failed" })
-  }
-}
+const handleSuggest = (req: http.IncomingMessage, res: http.ServerResponse) =>
+  jsonHandler<SuggestRequest>(req, res, {
+    label: "suggest",
+    validate: (b) =>
+      !b.persona || typeof b.situation !== "string" || !b.situation.trim()
+        ? "Missing persona or situation"
+        : null,
+    run: (b) =>
+      serverSuggest(
+        b.persona,
+        b.situation,
+        b.avoid ?? [],
+        b.count ?? 3,
+        b.direction ?? "to-target",
+        b.history ?? [],
+      ),
+  })
 
 async function handleAsk(req: http.IncomingMessage, res: http.ServerResponse) {
+  // Prelude: key guard + body parse + validation. (Shares the shape of
+  // jsonHandler but can't use it — ask's response is an SSE stream, not JSON.)
   if (!process.env.ZAI_API_KEY) {
     send(res, 500, { error: "Server missing ZAI_API_KEY" })
     return
@@ -239,11 +264,12 @@ async function handleAsk(req: http.IncomingMessage, res: http.ServerResponse) {
     return
   }
 
-  const { persona, question, history = [], quote } = body
-  if (!persona || typeof question !== "string" || !question.trim()) {
+  if (!body.persona || typeof body.question !== "string" || !body.question.trim()) {
     send(res, 400, { error: "Missing persona or question" })
     return
   }
+
+  const { persona, question, history = [], quote } = body
 
   // SSE streaming response. Events:
   //   data: {"type":"delta","text":"..."}   — incremental answer fragment
