@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import rehypeSanitize from "rehype-sanitize"
 
 /**
@@ -8,12 +9,20 @@ import rehypeSanitize from "rehype-sanitize"
  *  - rehype-sanitize is the explicit second layer that strips any HTML the
  *    model might emit via the few elements react-markdown does pass through.
  *
+ * `remark-gfm` enables GitHub-Flavored Markdown — tables, strikethrough, task
+ * lists, autolinks. Without it react-markdown v10 parses CommonMark only, so
+ * the Ask prompt's "tables are great for pronoun paradigms" guidance rendered
+ * tables as literal pipe text. The default sanitize schema allows table tags,
+ * so tables survive both layers.
+ *
  * Styling lives in index.css under `.markdown-body`.
  */
 export function Markdown({ children }: { children: string }) {
   return (
     <div className="markdown-body">
-      <ReactMarkdown rehypePlugins={[rehypeSanitize]}>{children}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+        {children}
+      </ReactMarkdown>
     </div>
   )
 }
