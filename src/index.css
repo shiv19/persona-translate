@@ -1,20 +1,26 @@
 :root {
-  --bg: #0f0f1a;
-  --bg-elevated: #1a1a2e;
-  --bg-card: #22223a;
-  --bg-input: #2a2a45;
-  --text: #e8e8f0;
-  --text-muted: #8888aa;
-  --text-dim: #5a5a78;
-  --accent: #6c63ff;
-  --accent-hover: #7b73ff;
-  --accent-glow: rgba(108, 99, 255, 0.15);
-  --accent-soft: rgba(108, 99, 255, 0.12);
-  --danger: #ff4757;
-  --danger-hover: #ff6b81;
-  --success: #2ed573;
-  --border: rgba(255, 255, 255, 0.06);
-  --border-strong: rgba(255, 255, 255, 0.1);
+  /*
+     Green (#58CC02) is the signature action color; blue carries links/focus;
+     red is the error/heart tone. The canvas is light off-white with white
+     elevated surfaces, the opposite of the previous dark theme. */
+  --bg: #f7f7f7;
+  --bg-elevated: #ffffff;
+  --bg-card: #ffffff;
+  --bg-input: #f0f0f0;
+  --text: #3c3c3c;
+  --text-muted: #777777;
+  --text-dim: #afafaf;
+  --accent: #58cc02;
+  --accent-hover: #58a700;
+  --accent-glow: rgba(88, 204, 2, 0.16);
+  --accent-soft: rgba(88, 204, 2, 0.1);
+  --link: #1cb0f6;
+  --danger: #ff4b4b;
+  --danger-hover: #ea2b2b;
+  --success: #58cc02;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --table-stripe: rgba(0, 0, 0, 0.02);
   --radius: 14px;
   --radius-sm: 10px;
   --font: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -30,6 +36,30 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+}
+
+/* Dark theme — night palette. Near-black navy canvas, elevated
+   surfaces a step lighter, and the brand green/blue/red brightened so they
+   keep contrast on dark. Toggled via [data-theme="dark"] on <html>. */
+[data-theme="dark"] {
+  --bg: #131f24;
+  --bg-elevated: #1c2a31;
+  --bg-card: #213038;
+  --bg-input: #2a3b44;
+  --text: #f1f7f8;
+  --text-muted: #9db2ba;
+  --text-dim: #6b8189;
+  --accent: #6dd514;
+  --accent-hover: #7ee02b;
+  --accent-glow: rgba(109, 213, 20, 0.18);
+  --accent-soft: rgba(109, 213, 20, 0.12);
+  --link: #84d8ff;
+  --danger: #ff6961;
+  --danger-hover: #ff8480;
+  --success: #6dd514;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --table-stripe: rgba(255, 255, 255, 0.03);
 }
 
 * {
@@ -173,7 +203,7 @@ body {
 }
 
 .btn-danger:hover {
-  background: rgba(255, 71, 87, 0.1);
+  background: rgba(255, 75, 75, 0.1);
 }
 
 .btn-sm {
@@ -365,7 +395,7 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(108, 99, 255, 0.4);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18), 0 2px 6px var(--accent-glow);
   transition: transform 0.12s ease, background 0.15s ease;
   z-index: 20;
 }
@@ -384,6 +414,10 @@ body {
 .sidebar-header {
   padding: var(--space-5) var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
 }
 
 .sidebar-title {
@@ -574,8 +608,8 @@ body {
   align-items: center;
   gap: 10px;
   padding: 10px var(--space-4);
-  background: rgba(255, 71, 87, 0.08);
-  border-bottom: 1px solid rgba(255, 71, 87, 0.15);
+  background: rgba(255, 75, 75, 0.08);
+  border-bottom: 1px solid rgba(255, 75, 75, 0.18);
   font-size: 13px;
   color: var(--danger);
   flex-shrink: 0;
@@ -1430,7 +1464,7 @@ body {
 }
 
 .markdown-body tr:nth-child(even) td {
-  background: rgba(255, 255, 255, 0.015);
+  background: var(--table-stripe);
 }
 
 /* ── Favorites page ── */
@@ -1959,4 +1993,30 @@ body {
   }
 
   /* Forms already center via .app-main > .screen */
+}
+
+/* ── Theme toggle ── */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
+  flex-shrink: 0;
+}
+
+.theme-toggle:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.theme-toggle:active {
+  transform: scale(0.92);
 }

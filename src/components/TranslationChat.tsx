@@ -17,6 +17,7 @@ import { Markdown } from "./Markdown"
 import { BubbleActions } from "./BubbleActions"
 import { DebugDetails } from "./DebugDetails"
 import { ArrowLeft, SendHorizontal, ArrowRightLeft, X, Repeat, Star, Sparkles, Plus, History, MessageCircleQuestion, Quote, Copy, Check } from "lucide-react"
+import { ThemeToggle } from "./ThemeToggle"
 
 interface Props {
   persona: Persona
@@ -440,6 +441,7 @@ export function TranslationChat({ persona, conversationId, onBack, onFavorites, 
           >
             <History size={16} />
           </button>
+          <ThemeToggle />
         </div>
       </header>
 

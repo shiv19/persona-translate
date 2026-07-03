@@ -4,8 +4,8 @@
   "description": "Context-aware translations with persona-based honorifics",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f0f1a",
-  "theme_color": "#0f0f1a",
+  "background_color": "#f7f7f7",
+  "theme_color": "#f7f7f7",
   "icons": [
     {
       "src": "/icon.svg",

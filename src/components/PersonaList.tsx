@@ -1,5 +1,6 @@
 import type { Persona } from "../types"
 import { Plus, Pencil, Trash2, MessageSquare, ArrowRightLeft, MessagesSquare } from "lucide-react"
+import { ThemeToggle } from "./ThemeToggle"
 
 interface Props {
   personas: Persona[]
@@ -33,8 +34,11 @@ export function PersonaList({
     return (
       <div className="app-sidebar">
         <header className="sidebar-header">
-          <h1 className="sidebar-title">PersonaTranslate</h1>
-          <p className="sidebar-subtitle">Context-aware translations</p>
+          <div className="sidebar-header-text">
+            <h1 className="sidebar-title">PersonaTranslate</h1>
+            <p className="sidebar-subtitle">Context-aware translations</p>
+          </div>
+          <ThemeToggle />
         </header>
         <div className="sidebar-list">
           <button className="btn btn-primary btn-block sidebar-add-btn" onClick={onCreate}>
@@ -87,6 +91,7 @@ export function PersonaList({
             <h1 className="app-title">PersonaTranslate</h1>
             <p className="app-subtitle">Context-aware translations</p>
           </div>
+          <ThemeToggle />
         </header>
       </div>
 
